@@ -128,7 +128,7 @@ li{margin:4px 0}
 <li><b>Positivas:</b> roda 100% local; custo por lote conhecido e confirmado antes de começar; prompts editáveis sem mexer no código; fluxo visível como grafo; testes automáticos com modelo simulado.</li>
 <li><b>Negativas:</b> mais uma dependência (<code>langgraph</code>); as reclamações rodam uma por vez (sem paralelismo) e não há atalho para urgência crítica; o classificador de entrada acrescenta uma chamada por linha e depende de o modelo responder no formato esperado; o primeiro início baixa ~240 MB.</li>
 <li><b>Riscos aceitos:</b> o RAG por similaridade errou 2 de 12 casos (segunda via de boleto e débito não autorizado). A defesa para fraude é o modo <code>urgencia</code>, <b>ainda não verificado</b> nesse caso específico.</li>
-<li><b>Não coberto:</b> nomes de pessoas e endereços não são mascarados.</li>
+<li><b>Não coberto:</b> nomes de pessoas só são mascarados depois de “meu nome é”, “me chamo” e “sou o(a)” (52 de 54 casos do dataset), e endereços só pelo CEP. Nome citado de outra forma e endereço por extenso passam.</li>
 </ul>
 </section>
 
@@ -160,8 +160,11 @@ li{margin:4px 0}
 <tr><td>Triagem</td><td>500</td><td>~US$ 0,0006</td><td>~US$ 0,30</td></tr>
 <tr><td>Risco</td><td>até 500</td><td>~US$ 0,0012</td><td>~US$ 0,59</td></tr>
 <tr><td>Relatório</td><td>1</td><td>~US$ 0,002</td><td>~US$ 0,002</td></tr>
-<tr><td><b>Total</b></td><td></td><td></td><td><b>~US$ 1,24</b> (somando o classificador, medido; os demais valores vêm dos documentos dos agentes)</td></tr>
+<tr><td><b>Total</b></td><td></td><td></td><td><b>~US$ 1,24</b> com os preços do Haiku 5.5 dos documentos dos agentes. <b>Com o Haiku 4.5 do gateway, a medição real abaixo dá ~US$ 8.</b></td></tr>
 </tbody></table></div>
+<h3>Medição real: o fluxo completo em 20 reclamações</h3>
+<p>O grafo inteiro (classificador, triagem, risco e relatório) rodou com <b>Haiku 4.5</b> pelo AI Gateway (US$ 1 por 1M de tokens de entrada e US$ 5 de saída) em 20 reclamações do dataset: 14 concluídas, 6 bloqueadas e 48 chamadas, com 206.643 tokens de entrada e 9.349 de saída, cerca de <b>US$ 0,25</b>. O classificador responde por ~US$ 0,01 disso; o resto é triagem, risco e relatório, ou seja, ~<b>US$ 0,017 por reclamação concluída</b>, porque cada chamada de agente leva ~6 mil tokens de prompt com os trechos da política.</p>
+<p class="note"><b>Consequência:</b> as 451 reclamações aprovadas custariam ~US$ 7,7 nos agentes, mais ~US$ 0,35 do classificador, ~US$ 8 no total. A chave do grupo tem US$ 6,54 no total, e parte já foi gasta nos testes. O lote completo de 500 com os três agentes <b>não cabe nesse orçamento</b>. Opções: processar um subconjunto, enxugar os prompts dos agentes ou pedir mais orçamento. O teto de chamadas da prévia limita chamadas, não dólares.</p>
 
 <h3>Controles de custo no código</h3>
 <ul>
@@ -177,7 +180,7 @@ li{margin:4px 0}
 <section>
 <ul>
 <li>Tratar os dados do CSV como material de análise, nunca como instrução (regra no <code>CLAUDE.md</code> e em cada prompt).</li>
-<li>Mascarar CPF, cartão, e-mail, telefone e “conta + número” antes de enviar ao modelo e em toda saída, log e relatório.</li>
+<li>Mascarar CPF, cartão, e-mail, telefone, “conta + número”, CEP e nome declarado antes de enviar ao modelo e em toda saída, log e relatório.</li>
 <li>Manter a credencial só no servidor (ambiente ou <code>settings.json</code>), sem devolvê-la ao navegador nem aos logs.</li>
 <li>Servir somente em <code>127.0.0.1</code>, validando Host e Origin. O caderno e o tutor foram desligados do servidor.</li>
 <li>Editar apenas arquivos conhecidos (<code>CLAUDE.md</code>, <code>regras/*</code>, <code>.claude/agents/*.md</code>), sem <code>..</code> e sem links simbólicos.</li>
@@ -189,7 +192,7 @@ li{margin:4px 0}
 <h2 id="limites">7. O que não foi verificado</h2>
 <section>
 <ul>
-<li>Os testes automáticos usam modelo simulado. Houve chamadas reais só ao classificador de entrada, com Haiku 4.5 pelo AI Gateway, nas 500 linhas do dataset (306 mil tokens de entrada e 9 mil de saída, cerca de US$ 0,35): o custo de ~US$ 0,0007 por chamada vem dessa medição. Os agentes de triagem, risco e relatório não foram executados com modelo real nesta versão.</li>
+<li>Os testes automáticos usam modelo simulado. Houve chamadas reais com Haiku 4.5 pelo AI Gateway: o classificador de entrada nas 500 linhas do dataset (306 mil tokens de entrada e 9 mil de saída, cerca de US$ 0,35) e o grafo completo em 20 reclamações (US$ 0,25). A qualidade das respostas dos agentes de triagem, risco e relatório não foi avaliada nesta rodada, só que o fluxo conclui e que nenhum CPF, CEP ou nome vazou para linhas, logs e recomendações.</li>
 <li>Os números de acerto e custo vêm dos documentos dos agentes, medidos com outro modelo (Haiku 5.5) e em 5 tickets.</li>
 <li>O classificador rodou nas 500 linhas do dataset: bloqueou 49 (39 injeção e 10 ameaça), aprovou 451 e concordou com as 7 que o regex já bloqueia. Ou seja, o regex sozinho deixava passar 42 ataques. Não há gabarito no dataset: conferi os 49 bloqueios e as aprovadas com termos suspeitos (5, todas reclamações reais), e não vi falso positivo depois do ajuste do prompt (a REC-2026-00378, um pedido de resgate de fundo, foi bloqueada na primeira versão do prompt). Um ataque aprovado por engano continua possível e não foi medido.</li>
 <li>O Bedrock Guardrails não foi implementado; o requisito é atendido por guardrail em código, conforme a resposta da organização.</li>

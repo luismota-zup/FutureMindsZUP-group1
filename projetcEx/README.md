@@ -118,7 +118,7 @@ model: sonnet
 
 - Linhas com ataque de prompt, ameaça, texto curto ou longo demais são bloqueadas **antes** do modelo (regras em código), e recebem uma resposta educada sem detalhes internos.
 - Com o **classificador de entrada** ligado (`classificador_entrada` em `regras/pipeline.json`, ligado por padrão), cada linha que passou pelas regras é classificada por um modelo leve em `reclamacao_valida`, `injecao`, `ameaca` ou `fora_escopo`, **antes** dos agentes. Só a reclamação válida segue; as demais viram bloqueadas com a resposta educada. Se o modelo não devolver uma classe válida (duas tentativas), a linha vira `falha` e não é processada. Custa uma chamada a mais por linha, e o log registra o passo como `classificador_entrada`.
-- CPF, cartão, e-mail, telefone e “conta + número” são mascarados antes de ir ao modelo e em toda saída, log e relatório.
+- CPF, cartão, e-mail, telefone, “conta + número”, CEP e nome declarado (depois de “meu nome é”, “me chamo” ou “sou o(a)”) são mascarados antes de ir ao modelo e em toda saída, log e relatório.
 - Campos com valores permitidos só aceitam esses valores. Qualquer outra resposta reprova a linha.
 - Palavras impróprias saem ofuscadas (`m****`) e o resumo é cortado no limite configurado.
 - `produto` vazio vira o valor padrão do campo (`Não Identificado` no exemplo).
@@ -132,7 +132,8 @@ model: sonnet
 
 - Bedrock Guardrails: o PDF o exige no nível 3 (p. 8), mas o guardrail daqui é em código (regras + classificador por modelo). A organização respondeu que o guardrail pode ser feito via código. O AI Gateway não expõe guardrails para a chave do grupo.
 - Que o classificador acerte sempre: ele é um modelo. Nas 500 linhas do dataset ele bloqueou 49 (39 injeção e 10 ameaça) e aprovou 451; não há gabarito, então ataques aprovados por engano não foram medidos. Com o classificador desligado, detectar conteúdo fora do assunto volta a depender só do agente de triagem.
-- Mascarar nomes de pessoas ou endereços.
+- Mascarar nomes citados de outra forma, ou endereços por extenso (só o CEP é mascarado).
+- Que o lote completo caiba no orçamento da chave: medido com o Haiku 4.5 do gateway, cada reclamação concluída custa ~US$ 0,017 nos agentes (~US$ 8 para as 500, contra US$ 6,54 de orçamento). A prévia limita chamadas, não dólares.
 - A qualidade das respostas dos agentes, que ainda não foram testados com um modelo real.
 - Que a política seja seguida à risca: o RAG entrega os trechos, mas quem decide é o modelo.
 
@@ -154,7 +155,7 @@ CSV (colunas na ordem: `id`, colunas copiadas, seus campos), JSON (resultados, f
 Do mais barato ao mais real. Os passos 1 a 3 não gastam tokens.
 
 ```bash
-# 1. Testes automáticos (109 testes; modelo e política simulados, sem rede)
+# 1. Testes automáticos (118 testes; modelo e política simulados, sem rede)
 projetcEx/.venv/bin/python -m unittest discover -s projetcEx/tests -v
 node --check projetcEx/processador.js
 

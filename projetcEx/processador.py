@@ -406,7 +406,12 @@ def parse_texto(text: object, limite: int | None = None) -> dict:
 
 
 # ------------------------------------------------------------------ máscara, ofuscação e guardrails
+PALAVRA_NOME = r"[A-ZÀ-Ý][a-zà-ÿ]+"
+SEGUINTES_NOME = rf"(?:\s+(?:d[aeo]s?\s+)?{PALAVRA_NOME})"
 SENSIVEIS = [
+    ("NOME", re.compile(rf"(?P<pre>\b(?i:meu nome (?:completo )?é|me chamo|chamo-me)\s+){PALAVRA_NOME}{SEGUINTES_NOME}{{0,4}}")),
+    ("NOME", re.compile(rf"(?P<pre>\b(?i:sou (?:o|a))\s+){PALAVRA_NOME}{SEGUINTES_NOME}{{1,4}}")),
+    ("CEP", re.compile(r"\b\d{5}-\d{3}\b|\b(?i:cep)\b\W{0,3}\d{8}\b")),
     ("CONTA", re.compile(r"\b(?:conta|c/c|cc)\b[^\d\n]{0,15}\d{4,12}(?:-\d)?", re.I)),
     ("CPF", re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")),
     ("CARTAO", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
@@ -473,7 +478,7 @@ def resposta_bloqueio(motivo: str) -> str:
 def mascarar(texto: str) -> str:
     """Troca dados sensíveis por rótulos antes de enviar ao modelo e em toda saída ou log."""
     for rotulo, padrao in SENSIVEIS:
-        texto = padrao.sub(f"[{rotulo} OCULTO]", texto)
+        texto = padrao.sub(lambda m, r=rotulo: (m.groupdict().get("pre") or "") + f"[{r} OCULTO]", texto)
     return texto
 
 
