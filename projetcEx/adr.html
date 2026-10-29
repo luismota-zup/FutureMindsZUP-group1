@@ -44,7 +44,7 @@ li{margin:4px 0}
 <section>
 <p>Instituições financeiras recebem reclamações em texto livre, por vários canais, com ruído, palavras impróprias e urgências muito diferentes (do desconto de tarifa à denúncia de fraude). O FinGuard automatiza a triagem, a análise de risco e o relatório gerencial.</p>
 <p>Restrições do desafio: usar só o dataset fornecido, executar em ambiente local sem persistir dados em nuvem, registrar log de entrada, saída e tempo de cada agente, ter um guardrail como primeiro passo e justificar custos.</p>
-<p>O fluxo implementado é: <code>guardrail de entrada</code> → <code>agente de triagem</code> → <code>agente de risco</code> → <code>agente de relatório (uma vez por lote)</code> → <code>guardrail de saída</code>. Cada agente é um arquivo em <code>.claude/agents</code>, e o RAG da política interna (POL-SAC-001) entrega os trechos relevantes a cada um.</p>
+<p>O fluxo implementado, orquestrado em LangGraph (<code>grafo.py</code>), é: <code>guardrail de entrada</code> → <code>agente de triagem</code> → <code>agente de risco</code> → <code>guardrail de saída</code>, para cada reclamação. No fim do lote vem o <code>agente de relatório</code>. Cada agente é um arquivo em <code>.claude/agents</code>, e o RAG da política interna (POL-SAC-001) entrega os trechos relevantes a cada um.</p>
 </section>
 
 <h2 id="opcoes">2. Opções consideradas</h2>
@@ -53,8 +53,8 @@ li{margin:4px 0}
 <div class="tw"><table>
 <thead><tr><th>Opção</th><th>Prós</th><th>Contras</th></tr></thead>
 <tbody>
-<tr><td><b>A. Orquestrador próprio em Python</b> (escolhida)</td><td>Sem dependência extra. Agentes editáveis como arquivos. Custo de chamadas previsível e confirmado antes de rodar. Testável sem rede.</td><td>Não usa um framework de grafo. O fluxo condicional é código nosso.</td></tr>
-<tr><td>B. LangGraph</td><td>Recomendado pelo desafio. Grafo explícito, fluxos condicionais e paralelismo prontos.</td><td>Dependência pesada para um fluxo linear de poucos nós. Exige acoplar prompts ao código do grafo.</td></tr>
+<tr><td><b>A. LangGraph</b> (escolhida)</td><td>Recomendado pelo desafio (p. 6 e 7). Grafo explícito, com arestas condicionais (bloqueio, nova tentativa, falha) e diagrama gerado do próprio código. Os nós são montados a partir do <code>pipeline.json</code>, então os prompts continuam em arquivos <code>.md</code>.</td><td>Mais uma dependência (<code>langgraph</code>). O estado entre nós precisa ser declarado (TypedDict).</td></tr>
+<tr><td>B. Orquestrador próprio em Python (versão anterior)</td><td>Sem dependência extra. Testável sem rede.</td><td>O fluxo condicional fica escondido em <code>if</code> e laços. Não há grafo para mostrar nem para estender (paralelismo, atalhos).</td></tr>
 <tr><td>C. Bedrock Agents / Copilot Studio</td><td>Gerenciado, com guardrails e knowledge source integrados.</td><td>Exige conta e recursos na nuvem, com custo e desprovisionamento obrigatório. Menos controle local e menos testável.</td></tr>
 </tbody></table></div>
 
@@ -75,25 +75,54 @@ li{margin:4px 0}
 <tr><td><b>A. Regras em código + decisão do agente de triagem</b> (escolhida)</td><td>Roda local, sem custo. Bloqueio antes do modelo para ataques e ameaças conhecidos.</td><td>Regex não detecta conteúdo fora do assunto sozinho. A triagem cobre parte disso, ao custo de uma chamada.</td></tr>
 <tr><td>B. Bedrock Guardrails</td><td>Obrigatório no texto do nível 3 (p. 8). Classificador de tópicos e injeção.</td><td>Exige conta AWS e desprovisionar ao fim. <b>Não implementado.</b></td></tr>
 </tbody></table></div>
+
+<h3>2.4 Integração com o modelo (SDK)</h3>
+<div class="tw"><table>
+<thead><tr><th>Opção</th><th>Prós</th><th>Contras</th></tr></thead>
+<tbody>
+<tr><td><b>A. HTTP direto às APIs da Anthropic ou da OpenAI</b> (escolhida)</td><td>Funciona com a credencial que o time tem. Sem SDK extra. O provedor fica isolado na função <code>call_model</code>, que o grafo recebe pronta.</td><td>Não usa o Bedrock. Os preços e o faturamento são os da API do provedor.</td></tr>
+<tr><td>B. Boto3 (<code>bedrock-runtime</code>)</td><td>Citado pelo desafio (p. 7 e 14: execução local com Boto3 na Zup). Daria acesso ao Bedrock Guardrails e ao Titan com a mesma credencial.</td><td>Ninguém do time tem acesso à conta AWS agora. <b>Não implementado</b>; seria um novo <code>call_model</code>, sem mudar o grafo nem os agentes. O <code>--embeddings bedrock</code> já usa o Boto3 por meio do <code>langchain-aws</code>.</td></tr>
+</tbody></table></div>
 </section>
 
 <h2 id="decisao">3. Decisão</h2>
 <section>
 <ul>
-<li><b>Orquestrador próprio</b> com agentes em arquivos <code>.md</code>, executados em ordem, cada um recebendo o resultado do anterior. O desafio aceita “framework ou equivalente”.</li>
+<li><b>LangGraph</b> com dois grafos (<code>grafo.py</code>). O primeiro processa uma reclamação, com um nó por agente do <code>pipeline.json</code>. Cada agente recebe a saída <b>completa</b> dos anteriores (sinais, fatores, parecer), não só as colunas do CSV. O segundo processa o lote: todas as reclamações e, depois, o agente de relatório. JSON inválido volta ao próprio agente (laço de validação, até 2 chamadas) e a nova tentativa reaproveita os trechos da política. Sem resposta válida, a linha vai para <code>registrar_falha</code>. Cada nó registra no log o agente, a tentativa, o tempo do modelo e o tempo do RAG (<code>rag_s</code>).</li>
 <li><b>Um modelo por agente</b>, declarado no cabeçalho <code>model:</code> do arquivo. Hoje os três usam o alias <code>haiku</code>.</li>
 <li><b>Contas e listas no código, texto no modelo</b>: o dashboard, a lista de críticos e os pontos de atenção são calculados em código. O agente de relatório só escreve as recomendações.</li>
 <li><b>RAG local</b> com embeddings multilíngues, e o modo <code>urgencia</code> por regra como rede de segurança para fraude.</li>
 <li><b>Guardrail de entrada como primeiro passo</b> (regras) e <b>guardrail de saída</b> em código: máscara de dados sensíveis, ofuscação de palavras impróprias e ajuste de tom (sem emoji, sem exclamação, sem caixa alta).</li>
 </ul>
 <p class="note"><b>Divergência assumida:</b> o desafio exige Bedrock Guardrails, e esta solução usa regras locais. O próprio PDF aceita “tópicos do MS Copilot” (p. 5, 9 e 10), então a exigência é ambígua. Confirmar com a organização antes da apresentação.</p>
+<h3>Grafo por reclamação</h3>
+<p>Resumo do diagrama Mermaid que <code>python grafo.py</code> imprime a partir do <code>pipeline.json</code> atual. As linhas tracejadas são arestas condicionais.</p>
+<pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
+  __start__ --> guardrail_entrada
+  guardrail_entrada -. bloqueada .-> resposta_bloqueio
+  guardrail_entrada -. liberada .-> triagem
+  triagem -. ok .-> risco
+  triagem -. nova_tentativa .-> triagem
+  triagem -. sem_resposta_valida .-> registrar_falha
+  triagem -. nao_e_reclamacao .-> resposta_bloqueio
+  risco -. ok .-> guardrail_saida
+  risco -. nova_tentativa .-> risco
+  risco -. sem_resposta_valida .-> registrar_falha
+  risco -. nao_e_reclamacao .-> resposta_bloqueio
+  guardrail_saida --> __end__
+  resposta_bloqueio --> __end__
+  registrar_falha --> __end__</pre>
+<h3>Grafo do lote</h3>
+<pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
+  __start__ --> reclamacoes --> relatorio --> __end__</pre>
+<p>Diferença em relação ao grafo da p. 9 do PDF: lá o relatório fica dentro do fluxo de cada reclamação. Aqui ele roda uma vez por lote, porque consolida todas as reclamações. A saída do relatório também passa pela máscara e pelo ajuste de tom.</p>
 </section>
 
 <h2 id="consequencias">4. Consequências (trade-offs)</h2>
 <section>
 <ul>
-<li><b>Positivas:</b> roda 100% local; custo por lote conhecido e confirmado antes de começar; prompts editáveis sem mexer no código; 59 testes automáticos com modelo simulado.</li>
-<li><b>Negativas:</b> sem framework de grafo (fluxos condicionais são código manual); guardrail por regras tem menor cobertura que um classificador; o primeiro início baixa ~240 MB.</li>
+<li><b>Positivas:</b> roda 100% local; custo por lote conhecido e confirmado antes de começar; prompts editáveis sem mexer no código; fluxo visível como grafo; testes automáticos com modelo simulado.</li>
+<li><b>Negativas:</b> mais uma dependência (<code>langgraph</code>); as reclamações rodam uma por vez (sem paralelismo) e não há atalho para urgência crítica; o guardrail por regras tem menor cobertura que um classificador; o primeiro início baixa ~240 MB.</li>
 <li><b>Riscos aceitos:</b> o RAG por similaridade errou 2 de 12 casos (segunda via de boleto e débito não autorizado). A defesa para fraude é o modo <code>urgencia</code>, <b>ainda não verificado</b> nesse caso específico.</li>
 <li><b>Não coberto:</b> nomes de pessoas e endereços não são mascarados.</li>
 </ul>
@@ -159,6 +188,7 @@ li{margin:4px 0}
 <li>Os números de acerto e custo vêm dos documentos dos agentes, medidos com outro modelo (Haiku 5.5) e em 5 tickets.</li>
 <li>O dataset real de ~500 reclamações não foi visto.</li>
 <li>O Bedrock Guardrails não foi implementado.</li>
+<li>O Boto3 não é usado para chamar o modelo, por falta de acesso à conta AWS.</li>
 </ul>
 </section>
 

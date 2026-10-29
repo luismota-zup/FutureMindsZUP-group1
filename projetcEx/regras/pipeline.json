@@ -82,6 +82,23 @@
       "nome": "justificativa",
       "valores": [],
       "descricao": "uma frase ligando o risco aos fatos"
+    },
+    {
+      "padrao": "Não",
+      "max_caracteres": null,
+      "nome": "escalacao_imediata",
+      "valores": [
+        "Sim",
+        "Não"
+      ],
+      "descricao": "definida pelo agente de risco, fonte única da escalação; true/false também é aceito"
+    },
+    {
+      "padrao": "Nenhum",
+      "max_caracteres": 200,
+      "nome": "encaminhar_para",
+      "valores": [],
+      "descricao": "áreas definidas pelo agente de risco; lista também é aceita"
     }
   ],
   "separador": ",",

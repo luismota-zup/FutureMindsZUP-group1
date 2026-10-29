@@ -7,7 +7,9 @@ import tempfile
 import threading
 import time
 import unittest
+from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -18,6 +20,7 @@ sys.path.insert(0, str(HERE.parent))
 
 import processador as proc  # noqa: E402
 import servidor  # noqa: E402
+import grafo  # noqa: E402
 
 CSV = ("id,texto_reclamacao,produto\n"
        "1,\"Cobrança no cartão que eu não fiz, já liguei três vezes.\",Cartão de Crédito\n"
@@ -238,7 +241,8 @@ class RunTests(Base):
         _, job = self.run_job(fake_model)
         corpo, _, _ = proc.render_output(job, "csv")
         cabecalho = corpo.decode("utf-8-sig").splitlines()[0]
-        self.assertEqual(cabecalho, "id;data_reclamacao;canal;status;categoria;produto;sentimento;urgencia;resumo;risco;justificativa")
+        self.assertEqual(cabecalho, "id;data_reclamacao;canal;status;categoria;produto;sentimento;urgencia;resumo;risco;"
+                                    "justificativa;escalacao_imediata;encaminhar_para")
         self.assertTrue(corpo.startswith(b"\xef\xbb\xbf"))
 
     def test_fatal_error_stops_batch_without_retrying(self):
@@ -482,7 +486,8 @@ class SaidaTests(Base):
         self.rodar(modelo)
         self.assertEqual(len(enviados), 1)
         self.assertNotIn("terceira vez", enviados[0])
-        self.assertIn("totais", enviados[0])
+        self.assertIn('"painel"', enviados[0])
+        self.assertIn('"casos_criticos"', enviados[0])
 
     def test_no_sensitive_or_profane_text_in_any_output(self):
         def modelo(system, user):
@@ -711,7 +716,8 @@ class DesafioTests(Base):
         self.assertEqual(plan["chamadas_base"], 5)
         self.assertEqual(usados[:2], ["haiku", "claude-sonnet-5-5"])
         self.assertEqual(usados[-1], "haiku")  # relatório
-        self.assertEqual({item["modelo"] for item in job.logs}, {"haiku", "claude-sonnet-5-5"})
+        self.assertEqual({item["modelo"] for item in job.logs if item["agente"] != "guardrail_entrada"},
+                         {"haiku", "claude-sonnet-5-5"})
         self.assertEqual(proc.preview(plan)["modelos"],
                          {"triagem": "haiku", "risco": "claude-sonnet-5-5", "relatorio": "haiku"})
 
@@ -793,6 +799,84 @@ class DesafioTests(Base):
         ok = next(r for r in job.linhas if r["id"] == "1")
         self.assertEqual(ok["campos"]["resumo"], "Cliente exige solução.")
         self.assertTrue(any(i["agente"] == "guardrail_saida" and "caixa alta" in i["saida"] for i in job.logs))
+
+
+class Nivel2Tests(Base):
+    """Nível 2 (PDF p. 6 e 7): orquestração em LangGraph, saída completa entre agentes e relatório completo."""
+
+    def run_job(self, call_model, politica=POLITICA):
+        plan = proc.prepare(self.root, {"csv": CSV}, politica)
+        job = proc.Job(plan)
+        proc.run_job(job, plan, call_model)
+        return plan, job
+
+    def test_saida_do_risco_vira_colunas_escalacao_e_entrada_do_relatorio(self):
+        class PoliticaComSecoes(PoliticaFalsa):
+            secoes = [SimpleNamespace(titulo="Cartão de Crédito", texto="Prazo de 5 dias. Responsável: Gerência de Cartões.")]
+        recebido = {}
+
+        def model(system, user):
+            dados = json.loads(user)
+            if "etapa" not in dados:
+                recebido["relatorio"] = dados
+                return json.dumps({"mensagem_chave": "Dois casos de fraude pedem ação hoje.", "avisos": ["Amostra pequena."],
+                                   "recomendacoes": [{"acao": "Bloquear os cartões afetados", "casos": ["1", "3", "99"],
+                                                      "responsavel": "Gerência de Cartões", "motivo": "Fraude."}]})
+            if dados["etapa"].startswith("1/"):
+                return json.dumps({"categoria": "Fraude/Segurança", "produto": "Cartão de Crédito", "urgencia": "Crítica",
+                                   "sentimento": "Negativo", "resumo": "Cliente relata compra não reconhecida.",
+                                   "sinais": ["possivel_fraude"]})
+            recebido.setdefault("risco", dados["resultados_anteriores"])
+            return json.dumps({"nivel_risco": "Crítico", "justificativa": "Fraude com movimentação.",
+                               "escalacao_imediata": True, "encaminhar_para": ["Prevenção a Fraudes", "Compliance"],
+                               "fatores": ["fraude_em_curso"], "acoes_imediatas": ["[2.4] Bloquear o cartão em até 4h."],
+                               "parecer": "Compra não reconhecida com movimentação."})
+        _, job = self.run_job(model, PoliticaComSecoes())
+        self.assertEqual(recebido["risco"]["triagem"]["sinais"], ["possivel_fraude"])  # saída completa, não só o contrato
+        ok = next(r for r in job.linhas if r["id"] == "1")
+        self.assertEqual((ok["campos"]["risco"], ok["campos"]["escalacao_imediata"], ok["campos"]["encaminhar_para"]),
+                         ("Crítico", "Sim", "Prevenção a Fraudes; Compliance"))
+        caso = recebido["relatorio"]["casos_criticos"][0]
+        self.assertEqual((caso["nivel_risco"], caso["escalacao_imediata"], caso["gerencia_produto"]),
+                         ("Crítico", True, "Gerência de Cartões"))
+        self.assertEqual(recebido["relatorio"]["painel"]["bloqueados"]["tentativa_manipulacao"], 1)
+        rel = proc.relatorio_de(job)
+        self.assertEqual((rel["totais"]["criticas"], rel["totais"]["escalacoes"]), (2, 2))
+        self.assertEqual(rel["criticas"][0]["acoes"], ["[2.4] Bloquear o cartão em até 4h."])
+        self.assertIn(["Prevenção a Fraudes", 2], rel["contagens"]["encaminhamentos"])
+        self.assertIn("Casos: 1, 3.", rel["recomendacoes"][0])  # id fora do lote é descartado
+        for saida in (proc.render_html(rel), proc.render_markdown(rel)):
+            for trecho in ("Dois casos de fraude pedem ação hoje.", "Bloquear o cartão em até 4h", "Amostra pequena."):
+                self.assertIn(trecho, saida)
+
+    def test_grafo_repete_json_invalido_registra_falha_e_bloqueio_no_log(self):
+        politica, vezes = PoliticaFalsa(), Counter()
+
+        def model(system, user):
+            dados = json.loads(user)
+            if "etapa" in dados:
+                linha = "1" if "Cobrança" in dados["linha"]["texto_reclamacao"] else "3"
+                chave = (linha, dados["etapa"][0])
+                vezes[chave] += 1
+                if chave == ("1", "1") and vezes[chave] == 1 or chave == ("3", "2"):
+                    return "sem JSON"
+            return fake_model(system, user)
+        plan, job = self.run_job(model, politica)
+        self.assertEqual(job.status, "concluido")
+        self.assertEqual({r["id"]: r["status"] for r in job.linhas}, {"1": "ok", "2": "bloqueada", "3": "falha"})
+        self.assertIn("agente risco", next(r for r in job.linhas if r["id"] == "3")["motivo"])
+        self.assertEqual(vezes[("3", "2")], proc.TENTATIVAS)
+        triagem = [i for i in job.logs if i["id"] == "1" and i["agente"] == "triagem"]
+        self.assertEqual([i["tentativa"] for i in triagem], [1, 2])
+        self.assertIsNotNone(triagem[0]["rag_s"])
+        self.assertIsNone(triagem[1]["rag_s"])
+        self.assertEqual(len(politica.consultas), 4)  # a nova tentativa reaproveita os trechos
+        bloqueio = next(i for i in job.logs if i["agente"] == "guardrail_entrada")
+        self.assertEqual((bloqueio["id"], bloqueio["modelo"]), ("2", None))
+        self.assertTrue(bloqueio["saida"].startswith("bloqueada"))
+        diagrama = grafo.mermaid(plan)
+        for no in ("guardrail_entrada", "nova_tentativa", "registrar_falha", "resposta_bloqueio", "relatorio"):
+            self.assertIn(no, diagrama)
 
 
 if __name__ == "__main__":

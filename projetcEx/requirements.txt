@@ -1,5 +1,6 @@
-# Política interna (RAG). O restante do projeto usa só a biblioteca padrão do Python.
+# Orquestração dos agentes (Nível 2) e política interna (RAG). O restante usa só a biblioteca padrão do Python.
 # Versões testadas no Python 3.12 (Windows), no venv finguard_env.
+langgraph==1.2.18
 pypdf==6.21.4
 faiss-cpu==1.15.1
 fastembed==0.9.1

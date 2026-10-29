@@ -6,7 +6,7 @@ O caderno de estudo e o tutor **não fazem mais parte do servidor**: `/` e `/api
 
 ## Instalar
 
-O processador usa a biblioteca padrão, mas a política interna (RAG) precisa de `pypdf`, `faiss-cpu` e `fastembed`. Instale em um ambiente virtual, a partir de `projetcEx`:
+A orquestração dos agentes usa `langgraph`, e a política interna (RAG) usa `pypdf`, `faiss-cpu` e `fastembed`; o restante é biblioteca padrão. Instale em um ambiente virtual, a partir de `projetcEx`:
 
 ```bash
 python3 -m venv .venv
@@ -49,6 +49,23 @@ Se a indexação falhar, o servidor sobe mesmo assim, mostra um `AVISO` no termi
 3. **Política interna**: mostra a política indexada, permite enviar outra e buscar trechos para conferir o que o RAG recupera.
 4. **Agentes**: marque os agentes das linhas, ordene, escolha o agente do relatório (opcional) e edite os arquivos.
 5. **Executar**: a prévia não chama o modelo. Ela mostra o que será enviado, os avisos de esquema e o **teto de chamadas**; só então “Confirmar e processar”.
+
+## Orquestração (LangGraph)
+
+O lote roda em dois grafos LangGraph, definidos em `grafo.py` e montados a partir do `pipeline.json`:
+
+- **Por reclamação:** `guardrail_entrada` → um nó por agente de `agentes` → `guardrail_saida`.
+  - Arestas condicionais:
+    - `bloqueada` vai para `resposta_bloqueio`;
+    - `nova_tentativa`: JSON inválido volta ao próprio agente, até 2 chamadas, e reaproveita os trechos da política;
+    - `sem_resposta_valida` vai para `registrar_falha`;
+    - `nao_e_reclamacao`: a triagem bloqueou a mensagem.
+  - Cada agente recebe em `resultados_anteriores` a saída **completa** dos anteriores (por exemplo, os `sinais` da triagem), já mascarada.
+- **Do lote:** `reclamacoes` (o grafo acima, linha a linha) → `relatorio` (o `agente_relatorio`, uma vez).
+
+Para cada chamada, o log registra o agente, a tentativa, o modelo, o tempo, a entrada e a saída. Para os agentes com política, registra também o tempo do RAG (`rag_s`) e os trechos usados. Os bloqueios do guardrail de entrada aparecem como `guardrail_entrada`.
+
+Para ver o diagrama Mermaid do pipeline atual, rode: `python grafo.py`.
 
 ## Política interna (RAG)
 
@@ -121,12 +138,21 @@ model: sonnet
 
 CSV (colunas na ordem: `id`, colunas copiadas, seus campos), JSON (resultados, falhas, bloqueadas, relatório e logs por agente), relatório HTML com gráficos e relatório Markdown.
 
+- O agente de risco é a fonte única da escalação. Seus campos `escalacao_imediata` (`true`/`false`) e `encaminhar_para` (lista) viram as colunas `Sim`/`Não` e `área A; área B`.
+- O relatório traz:
+  - mensagem-chave;
+  - casos críticos (risco ou urgência Crítica), com escalação imediata primeiro, encaminhamentos, ações imediatas e parecer;
+  - contagem de fatores de risco e de encaminhamentos;
+  - recomendações com responsável e casos;
+  - avisos do agente de relatório.
+- O agente de relatório recebe só o painel (contagens) e os casos críticos, com a gerência responsável pelo produto lida da seção 3 da política. Nunca recebe o texto nem o resumo das reclamações.
+
 ## Como testar
 
 Do mais barato ao mais real. Os passos 1 a 3 não gastam tokens.
 
 ```bash
-# 1. Testes automáticos (88 testes; modelo e política simulados, sem rede)
+# 1. Testes automáticos (90 testes; modelo e política simulados, sem rede)
 projetcEx/.venv/bin/python -m unittest discover -s projetcEx/tests -v
 node --check projetcEx/processador.js
 

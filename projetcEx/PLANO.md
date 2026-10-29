@@ -31,6 +31,7 @@ Atualizado em 26/10/2026. Etapas 5 a 8 implementadas e testadas com modelo simul
 | 20 | Agente opcional `relatorio` escreve as recomendações; só vê números e casos classificados, nunca o texto das reclamações. Se falhar, o lote conclui com uma nota | `processador.py`, `.claude/agents/relatorio.md` | testes unitários |
 | 21 | Relatório `.html` com gráficos de barras (sem biblioteca, sem rede, tudo escapado) e `.md`; botão de download | `processador.py`, interface | testes + captura no Chrome |
 | 22 | Guardrail de saída: máscara e ofuscação em resumo, justificativa, recomendações, logs e no que passa de um agente ao outro; resposta de bloqueio educada, sem detalhes internos; log por agente na página | `processador.py`, interface | testes sobre os 4 formatos de saída |
+| 23 | Nível 2: orquestração em LangGraph (grafo por reclamação e do lote), com arestas condicionais, nova tentativa por JSON inválido e saída completa repassada entre agentes. Colunas `escalacao_imediata` e `encaminhar_para` vindas do agente de risco. Relatório com mensagem-chave, escalações, encaminhamentos, ações imediatas e avisos | `grafo.py`, `processador.py`, `regras/pipeline.json` | testes unitários (`Nivel2Tests`) |
 
 Dois agentes de partida (`triagem`, `risco`), um `CLAUDE.md`, regras fictícias e um `pipeline.json` com os 7 campos (categoria, produto, sentimento, urgencia, resumo, risco, justificativa) já estão criados.
 
@@ -92,6 +93,16 @@ Hoje só o prompt pede estas regras; um modelo pode ignorá-las.
 - [~] Layout em celular: conferido até 500 px (limite do Chrome headless); 390 px reais não testados.
 - [ ] **Um teste real e barato**: 2 linhas, com sua chave, depois de confirmar a prévia. Só você pode autorizar esse custo.
 
+### Etapa 10 — Nível 2: orquestração (p. 6 e 7) · FEITA
+- [x] LangGraph: `guardrail_entrada` → triagem → risco → `guardrail_saida` por reclamação; `reclamacoes` → `relatorio` no lote. O diagrama sai de `python grafo.py`.
+- [x] Fluxos condicionais: bloqueio, nova tentativa (laço de validação), falha e “não é reclamação”.
+- [x] O risco recebe a saída completa da triagem (sinais, confiança), não só as colunas.
+- [x] Escalação imediata e encaminhamentos do agente de risco viram colunas e entram no relatório.
+- [x] Log com tentativa, modelo, tempo do modelo e tempo do RAG; bloqueios do guardrail de entrada no log.
+- [x] Agente de relatório recebe painel e casos críticos (com a gerência do produto lida da política), nunca o texto.
+- [ ] Opcionais do PDF não feitos: atalho para urgência crítica e paralelismo entre reclamações.
+- [ ] Boto3: só justificado no ADR (sem acesso à conta AWS).
+
 ## 4. Fora do escopo desta pasta (decisões suas)
 - **ADR em HTML navegável** e a **justificativa de custos** (p. 8): são entregas de arquitetura do desafio. Posso gerar um rascunho se pedir.
 - **Bedrock Guardrails × tópicos do MS Copilot**: o PDF é inconsistente (p. 8 versus p. 9 e 10). O guardrail local desta pasta é um substituto de estudo. Confirme com a organização.
@@ -126,10 +137,11 @@ projetcEx/
 ├── regras/regras.md            suas regras, em texto livre
 ├── regras/pipeline.json        agentes, ordem, campos de saída, separador
 ├── processador.py              lógica: CSV, máscara, guardrails, agentes, lote, relatório, saídas
+├── grafo.py                    orquestração LangGraph (nós e arestas); `python grafo.py` imprime o diagrama
 ├── exemplo_reclamacoes.csv     10 linhas fictícias no formato do PDF (inclui ataque, ameaça, produto vazio)
 ├── servidor.py                 rotas /api/proc/* e adaptador do modelo
 ├── processador.html/.css/.js   interface
-└── tests/test_processador.py   41 testes
+└── tests/test_processador.py   testes do processador (modelo e política simulados)
 ```
 Arquivos temporários fora do projeto: `/tmp/pe_qa` (servidor e capturas de teste) e `/tmp/pdfx` (texto extraído do PDF). Podem ser apagados.
 
