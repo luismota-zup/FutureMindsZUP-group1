@@ -1,0 +1,95 @@
+{
+  "agentes": [
+    "triagem",
+    "risco"
+  ],
+  "agente_relatorio": "relatorio",
+  "campos": [
+    {
+      "padrao": "Outros",
+      "max_caracteres": null,
+      "nome": "categoria",
+      "valores": [
+        "Cobrança Indevida",
+        "Atendimento",
+        "Fraude/Segurança",
+        "Produto/Serviço",
+        "Cancelamento",
+        "Outros"
+      ],
+      "descricao": ""
+    },
+    {
+      "padrao": "Não Identificado",
+      "max_caracteres": null,
+      "nome": "produto",
+      "valores": [
+        "Cartão de Crédito",
+        "Conta Corrente",
+        "Empréstimo",
+        "Investimentos",
+        "Seguros",
+        "Não Identificado"
+      ],
+      "descricao": "se a coluna produto do CSV estiver vazia, identifique pelo texto"
+    },
+    {
+      "padrao": "",
+      "max_caracteres": null,
+      "nome": "sentimento",
+      "valores": [
+        "Positivo",
+        "Neutro",
+        "Negativo",
+        "Crítico"
+      ],
+      "descricao": ""
+    },
+    {
+      "padrao": "",
+      "max_caracteres": null,
+      "nome": "urgencia",
+      "valores": [
+        "Baixa",
+        "Média",
+        "Alta",
+        "Crítica"
+      ],
+      "descricao": ""
+    },
+    {
+      "padrao": "",
+      "max_caracteres": 400,
+      "nome": "resumo",
+      "valores": [],
+      "descricao": "2 a 3 linhas, linguagem padronizada, tom neutro, sem palavrões"
+    },
+    {
+      "padrao": "",
+      "max_caracteres": null,
+      "nome": "risco",
+      "valores": [
+        "Baixo",
+        "Médio",
+        "Alto",
+        "Crítico"
+      ],
+      "descricao": ""
+    },
+    {
+      "padrao": "",
+      "max_caracteres": 300,
+      "nome": "justificativa",
+      "valores": [],
+      "descricao": "uma frase ligando o risco aos fatos"
+    }
+  ],
+  "separador": ",",
+  "incluir_claude_md": true,
+  "copiar_colunas": [
+    "data_reclamacao",
+    "canal",
+    "status"
+  ],
+  "improprios": []
+}

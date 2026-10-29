@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ADR · FinGuard processador</title>
+<style>
+:root{--bg:#f6f7f2;--fg:#20312e;--mut:#62726b;--card:#fff;--line:#dde4da;--acc:#214d3d;--warn:#fbf3e7;--warnb:#c89d62}
+@media (prefers-color-scheme:dark){:root{--bg:#14201d;--fg:#e6efe9;--mut:#9fb2a9;--card:#1c2c28;--line:#2d423c;--acc:#7cc3a4;--warn:#2d2616;--warnb:#c89d62}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:24px 16px 80px}
+header h1{font-size:28px;line-height:1.2;margin:0 0 6px}
+.meta{color:var(--mut);font-size:14px;margin:0 0 20px}
+nav{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:8px 0;margin-bottom:8px;z-index:2}
+nav a{display:inline-block;color:var(--acc);text-decoration:none;font-size:14px;padding:4px 10px;border-radius:8px}
+nav a:hover,nav a:focus-visible{background:var(--line);outline:none}
+h2{font-size:21px;margin:34px 0 10px;scroll-margin-top:56px}
+h3{font-size:16px;margin:20px 0 6px}
+section,.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:6px 18px 14px;margin:14px 0}
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:8px;text-align:left;vertical-align:top}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--mut)}
+.note{background:var(--warn);border-left:3px solid var(--warnb);padding:10px 14px;border-radius:6px;font-size:14px;margin:12px 0}
+.tag{display:inline-block;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:1px 9px;color:var(--mut)}
+code{font-size:13px;background:var(--line);padding:1px 5px;border-radius:4px}
+li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+<h1>ADR · Arquitetura do processador FinGuard</h1>
+<p class="meta">Registro de decisão arquitetural (nível 3 do desafio Future Minds 3) · Status: <span class="tag">proposto</span> · Atualizado em 29/10/2026</p>
+</header>
+<nav aria-label="Seções do ADR">
+<a href="#contexto">Contexto</a><a href="#opcoes">Opções</a><a href="#decisao">Decisão</a><a href="#consequencias">Consequências</a><a href="#custos">Custos</a><a href="#seguranca">Segurança</a><a href="#limites">Limites</a>
+</nav>
+<main>
+
+<h2 id="contexto">1. Contexto</h2>
+<section>
+<p>Instituições financeiras recebem reclamações em texto livre, por vários canais, com ruído, palavras impróprias e urgências muito diferentes (do desconto de tarifa à denúncia de fraude). O FinGuard automatiza a triagem, a análise de risco e o relatório gerencial.</p>
+<p>Restrições do desafio: usar só o dataset fornecido, executar em ambiente local sem persistir dados em nuvem, registrar log de entrada, saída e tempo de cada agente, ter um guardrail como primeiro passo e justificar custos.</p>
+<p>O fluxo implementado é: <code>guardrail de entrada</code> → <code>agente de triagem</code> → <code>agente de risco</code> → <code>agente de relatório (uma vez por lote)</code> → <code>guardrail de saída</code>. Cada agente é um arquivo em <code>.claude/agents</code>, e o RAG da política interna (POL-SAC-001) entrega os trechos relevantes a cada um.</p>
+</section>
+
+<h2 id="opcoes">2. Opções consideradas</h2>
+<section>
+<h3>2.1 Orquestração</h3>
+<div class="tw"><table>
+<thead><tr><th>Opção</th><th>Prós</th><th>Contras</th></tr></thead>
+<tbody>
+<tr><td><b>A. Orquestrador próprio em Python</b> (escolhida)</td><td>Sem dependência extra. Agentes editáveis como arquivos. Custo de chamadas previsível e confirmado antes de rodar. Testável sem rede.</td><td>Não usa um framework de grafo. O fluxo condicional é código nosso.</td></tr>
+<tr><td>B. LangGraph</td><td>Recomendado pelo desafio. Grafo explícito, fluxos condicionais e paralelismo prontos.</td><td>Dependência pesada para um fluxo linear de poucos nós. Exige acoplar prompts ao código do grafo.</td></tr>
+<tr><td>C. Bedrock Agents / Copilot Studio</td><td>Gerenciado, com guardrails e knowledge source integrados.</td><td>Exige conta e recursos na nuvem, com custo e desprovisionamento obrigatório. Menos controle local e menos testável.</td></tr>
+</tbody></table></div>
+
+<h3>2.2 Recuperação da política (RAG)</h3>
+<div class="tw"><table>
+<thead><tr><th>Opção</th><th>Prós</th><th>Contras</th></tr></thead>
+<tbody>
+<tr><td><b>A. Embeddings locais + FAISS + regras por seção</b> (escolhida)</td><td>Sem rede após o primeiro download. Modo <code>urgencia</code> garante as seções de urgência. Citação de seção rastreável.</td><td>Download de ~240 MB na primeira execução. Acerto@4 medido de 10/12 (83%).</td></tr>
+<tr><td>B. Política inteira no prompt</td><td>Zero erro de recuperação. Mais simples.</td><td>Custo maior por chamada e perde o requisito de RAG do desafio.</td></tr>
+<tr><td>C. Bedrock Knowledge Bases + Titan</td><td>Citado pelo desafio no nível 3.</td><td>Exige AWS. O projeto aceita <code>--embeddings bedrock</code> só para os vetores.</td></tr>
+<tr><td>D. BM25 ou híbrido BM25 + embeddings</td><td>Léxico entende termos como “Procon”. Híbrido tende a ser o melhor custo-benefício.</td><td>Não implementado. Mais código.</td></tr>
+</tbody></table></div>
+
+<h3>2.3 Guardrails</h3>
+<div class="tw"><table>
+<thead><tr><th>Opção</th><th>Prós</th><th>Contras</th></tr></thead>
+<tbody>
+<tr><td><b>A. Regras em código + decisão do agente de triagem</b> (escolhida)</td><td>Roda local, sem custo. Bloqueio antes do modelo para ataques e ameaças conhecidos.</td><td>Regex não detecta conteúdo fora do assunto sozinho. A triagem cobre parte disso, ao custo de uma chamada.</td></tr>
+<tr><td>B. Bedrock Guardrails</td><td>Obrigatório no texto do nível 3 (p. 8). Classificador de tópicos e injeção.</td><td>Exige conta AWS e desprovisionar ao fim. <b>Não implementado.</b></td></tr>
+</tbody></table></div>
+</section>
+
+<h2 id="decisao">3. Decisão</h2>
+<section>
+<ul>
+<li><b>Orquestrador próprio</b> com agentes em arquivos <code>.md</code>, executados em ordem, cada um recebendo o resultado do anterior. O desafio aceita “framework ou equivalente”.</li>
+<li><b>Um modelo por agente</b>, declarado no cabeçalho <code>model:</code> do arquivo. Hoje os três usam o alias <code>haiku</code>.</li>
+<li><b>Contas e listas no código, texto no modelo</b>: o dashboard, a lista de críticos e os pontos de atenção são calculados em código. O agente de relatório só escreve as recomendações.</li>
+<li><b>RAG local</b> com embeddings multilíngues, e o modo <code>urgencia</code> por regra como rede de segurança para fraude.</li>
+<li><b>Guardrail de entrada como primeiro passo</b> (regras) e <b>guardrail de saída</b> em código: máscara de dados sensíveis, ofuscação de palavras impróprias e ajuste de tom (sem emoji, sem exclamação, sem caixa alta).</li>
+</ul>
+<p class="note"><b>Divergência assumida:</b> o desafio exige Bedrock Guardrails, e esta solução usa regras locais. O próprio PDF aceita “tópicos do MS Copilot” (p. 5, 9 e 10), então a exigência é ambígua. Confirmar com a organização antes da apresentação.</p>
+</section>
+
+<h2 id="consequencias">4. Consequências (trade-offs)</h2>
+<section>
+<ul>
+<li><b>Positivas:</b> roda 100% local; custo por lote conhecido e confirmado antes de começar; prompts editáveis sem mexer no código; 59 testes automáticos com modelo simulado.</li>
+<li><b>Negativas:</b> sem framework de grafo (fluxos condicionais são código manual); guardrail por regras tem menor cobertura que um classificador; o primeiro início baixa ~240 MB.</li>
+<li><b>Riscos aceitos:</b> o RAG por similaridade errou 2 de 12 casos (segunda via de boleto e débito não autorizado). A defesa para fraude é o modo <code>urgencia</code>, <b>ainda não verificado</b> nesse caso específico.</li>
+<li><b>Não coberto:</b> nomes de pessoas e endereços não são mascarados.</li>
+</ul>
+</section>
+
+<h2 id="custos">5. Análise de custos e escolha de modelos</h2>
+<section>
+<div class="note"><b>Leia antes de usar estes números.</b> Os valores abaixo vêm dos documentos <code>prompt_agente_*.md</code>, que os registram como medidos com <b>Claude Haiku 5.5</b> em 5 tickets (3 execuções cada). Eu <b>não</b> reproduzi essas medições. O alias <code>haiku</code> deste ambiente aponta para <code>claude-haiku-4-5</code>, outro modelo, então acerto e custo podem diferir. Os preços são os públicos da API da Anthropic; <b>no Bedrock o preço é definido pela AWS</b>. Confirme em aws.amazon.com/bedrock/pricing antes de apresentar.</div>
+
+<h3>Por que um modelo leve nos três agentes</h3>
+<ul>
+<li>Classificação com regras fechadas e saída em JSON é tarefa de modelo leve; o relatório só redige a partir de números já calculados.</li>
+<li>O risco é o agente que mais depende de julgamento. Segundo o documento do agente, não houve caso crítico rebaixado em 12 de 12 chamadas. A amostra é pequena (5 tickets).</li>
+<li>Critério bônus do desafio: modelo menor em tarefa simples. Como cada agente tem o campo <code>model:</code>, dá para subir só o risco para um modelo maior sem tocar nos outros.</li>
+</ul>
+
+<h3>Comparação de preço por token (informada nos documentos dos agentes)</h3>
+<div class="tw"><table>
+<thead><tr><th>Modelo</th><th>Entrada / 1M tokens</th><th>Saída / 1M tokens</th><th>Quando usar</th></tr></thead>
+<tbody>
+<tr><td>Claude Haiku 5.5</td><td>US$ 0,10</td><td>US$ 0,50</td><td>Triagem, risco e relatório (padrão)</td></tr>
+<tr><td>Claude Sonnet 5.5</td><td>US$ 2</td><td>US$ 10</td><td>Segunda opinião em risco Crítico com confiança Baixa, se um teste maior mostrar rebaixamentos (~20× o Haiku)</td></tr>
+<tr><td>Claude Opus 5.5</td><td>US$ 4</td><td>US$ 20</td><td>Casos ambíguos de LGPD e sigilo, se o Sonnet também errar (~40× o Haiku)</td></tr>
+</tbody></table></div>
+
+<h3>Custo estimado de um lote de 500 reclamações</h3>
+<div class="tw"><table>
+<thead><tr><th>Agente</th><th>Chamadas</th><th>Por chamada</th><th>Total</th></tr></thead>
+<tbody>
+<tr><td>Triagem</td><td>500</td><td>~US$ 0,0006</td><td>~US$ 0,30</td></tr>
+<tr><td>Risco</td><td>até 500</td><td>~US$ 0,0012</td><td>~US$ 0,59</td></tr>
+<tr><td>Relatório</td><td>1</td><td>~US$ 0,002</td><td>~US$ 0,002</td></tr>
+<tr><td><b>Total</b></td><td></td><td></td><td><b>~US$ 0,89</b> (~US$ 0,45 em lote, segundo os documentos)</td></tr>
+</tbody></table></div>
+
+<h3>Controles de custo no código</h3>
+<ul>
+<li><b>Teto de chamadas confirmado</b>: a prévia calcula o máximo (com uma nova tentativa por falha) e só processa se o número confirmado for igual.</li>
+<li><b>Bloqueio antes do modelo</b>: linhas com ataque, ameaça, texto curto ou longo demais não gastam tokens.</li>
+<li><b>Interrupção do lote</b>: erro de chave, modelo ou cota para tudo; 4 falhas técnicas seguidas também.</li>
+<li><b>Modelo por agente</b> no cabeçalho, para equilibrar custo e acerto.</li>
+</ul>
+<p>Para recalcular com outro modelo ou outro preço, substitua os valores da tabela de preços e multiplique pelas chamadas do lote; o teto de chamadas aparece na prévia da página.</p>
+</section>
+
+<h2 id="seguranca">6. Recomendações de segurança</h2>
+<section>
+<ul>
+<li>Tratar os dados do CSV como material de análise, nunca como instrução (regra no <code>CLAUDE.md</code> e em cada prompt).</li>
+<li>Mascarar CPF, cartão, e-mail, telefone e “conta + número” antes de enviar ao modelo e em toda saída, log e relatório.</li>
+<li>Manter a credencial só no servidor (ambiente ou <code>settings.json</code>), sem devolvê-la ao navegador nem aos logs.</li>
+<li>Servir somente em <code>127.0.0.1</code>, validando Host e Origin. O caderno e o tutor foram desligados do servidor.</li>
+<li>Editar apenas arquivos conhecidos (<code>CLAUDE.md</code>, <code>regras/*</code>, <code>.claude/agents/*.md</code>), sem <code>..</code> e sem links simbólicos.</li>
+<li>Neutralizar células de CSV contra fórmula de planilha e escapar todo texto no relatório HTML.</li>
+<li>Desprovisionar qualquer recurso de nuvem criado para o desafio ao fim do evento (guardrails, buckets, endpoints).</li>
+</ul>
+</section>
+
+<h2 id="limites">7. O que não foi verificado</h2>
+<section>
+<ul>
+<li>Nenhuma chamada real ao modelo foi feita nesta solução; os testes usam modelo simulado.</li>
+<li>Os números de acerto e custo vêm dos documentos dos agentes, medidos com outro modelo (Haiku 5.5) e em 5 tickets.</li>
+<li>O dataset real de ~500 reclamações não foi visto.</li>
+<li>O Bedrock Guardrails não foi implementado.</li>
+</ul>
+</section>
+
+</main>
+</div>
+</body>
+</html>

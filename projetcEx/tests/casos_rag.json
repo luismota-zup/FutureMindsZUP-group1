@@ -1,0 +1,14 @@
+[
+  {"consulta": "Clonaram meu cartão e apareceram compras que eu não fiz na fatura", "esperadas": ["3.1", "2.4"]},
+  {"consulta": "Estão cobrando uma tarifa de manutenção na minha conta que eu nunca contratei", "esperadas": ["3.2"]},
+  {"consulta": "Os juros das parcelas do meu empréstimo estão diferentes do que foi contratado", "esperadas": ["3.3"]},
+  {"consulta": "Paguei o financiamento todo e continuam me cobrando as parcelas", "esperadas": ["3.3"]},
+  {"consulta": "Não consigo resgatar o dinheiro aplicado no fundo, está bloqueado", "esperadas": ["3.4"]},
+  {"consulta": "A seguradora negou o meu sinistro sem explicar o motivo", "esperadas": ["3.5"]},
+  {"consulta": "Se não resolverem vou registrar queixa no Procon e no Banco Central", "esperadas": ["4.3", "2.4"]},
+  {"consulta": "Já liguei no SAC três vezes e ninguém resolveu, por isso estou recorrendo", "esperadas": ["4.2", "2.3"]},
+  {"consulta": "Vou postar no Instagram e no Twitter o descaso de vocês", "esperadas": ["4.4"]},
+  {"consulta": "Gostaria apenas de saber como emitir a segunda via do boleto", "esperadas": ["2.1"]},
+  {"consulta": "Debitaram R$ 2.300 da minha conta sem autorização e estou sem dinheiro para comprar remédio", "esperadas": ["2.4", "2.3"]},
+  {"consulta": "Meus dados pessoais e meu CPF foram compartilhados com outra empresa", "esperadas": ["5"]}
+]

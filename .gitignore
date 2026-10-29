@@ -1,0 +1,11 @@
+# Modelo de embeddings (235 MB; o GitHub recusa arquivos acima de 100 MB). Baixa de novo no primeiro início.
+projetcEx/.cache/
+# Pasta fora do escopo do repositório
+projetcEx/FM3/
+FM3/
+__pycache__/
+*.pyc
+.idea/
+*:Zone.Identifier
+.env
+.env.*

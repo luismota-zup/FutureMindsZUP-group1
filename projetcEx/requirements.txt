@@ -1,0 +1,11 @@
+# Política interna (RAG). O restante do projeto usa só a biblioteca padrão do Python.
+# Versões testadas no Python 3.12 (Windows), no venv finguard_env.
+pypdf==6.21.4
+faiss-cpu==1.15.1
+fastembed==0.9.1
+# DLLs do Visual C++ exigidas pelo onnxruntime em máquinas sem o redistribuível instalado.
+msvc-runtime==14.51.36231; sys_platform == "win32"
+
+# Opcional, só para --embeddings bedrock (Titan, Nível 3):
+# langchain-aws
+# boto3
