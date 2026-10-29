@@ -37,6 +37,7 @@ PROC_STATIC = {"/processador": ("processador.html", "text/html"),
 # O caderno (/) e o tutor (/api/chat) ficam desligados: qualquer outra rota responde 404.
 BASE_GET = ("/api/status", "/styles.css")
 EXEMPLO = HERE / "exemplo_reclamacoes.csv"
+RELATORIOS = HERE.parent / "relatorio"  # relatórios HTML de cada lote concluído (fora do git: podem ter dados do dataset)
 POLITICA_PADRAO = HERE / "Docs - Challenge" / "KS_POLITICA_INTERNA (4).pdf"
 ERROS_CONTROLADOS = (proc.ProcError, rag.PoliticaError)
 MAX_PROC_BODY = 4_500_000
@@ -89,6 +90,20 @@ def _id_do_alias(alias: str) -> str:
     return valor.strip()
 
 
+def opcoes_de_modelo(srv) -> dict:
+    """Modelos que a página oferece por agente. Só o provedor `claude` tem aliases; o ID de cada um vem do
+    settings.json (nunca a credencial). `id` vazio = alias sem ID definido, que falharia ao processar."""
+    opcoes = []
+    if srv.provider == "claude":
+        for alias in ALIASES_MODELO:
+            try:
+                identificador = _id_do_alias(alias)
+            except ModelError:
+                identificador = ""
+            opcoes.append({"valor": alias, "id": identificador})
+    return {"padrao": srv.model, "provider": srv.provider, "opcoes": opcoes}
+
+
 def make_call_model(srv):
     """Cria o `call_model(system, user, modelo="")` usado pelos agentes; usa a credencial só no servidor."""
     def call_model(system: str, user: str, modelo: str = "") -> str:
@@ -131,11 +146,12 @@ def make_call_model(srv):
 
 
 class ProcServer(base.StudyServer):
-    def __init__(self, address, api_key: str, model: str, *, root: Path = HERE, **kwargs):
+    def __init__(self, address, api_key: str, model: str, *, root: Path = HERE, pasta_relatorio: Path | None = RELATORIOS,
+                 **kwargs):
         super().__init__(address, api_key, model, **kwargs)
         self.RequestHandlerClass = ProcHandler  # o construtor base fixa o handler do caderno
         self.root = root
-        self.jobs = proc.JobManager()
+        self.jobs = proc.JobManager(pasta_relatorio=pasta_relatorio)
         self.call_model = make_call_model(self)
         # GerenciadorPolitica (politica_rag); a política enviada pela tela vale até reiniciar o servidor.
         self.politica = None
@@ -207,6 +223,8 @@ class ProcHandler(base.StudyHandler):
             self.reply_json(200, proc.list_files(root))
         elif path == "/api/proc/arquivo":
             self.reply_json(200, proc.read_file(root, query.get("path", "")))
+        elif path == "/api/proc/modelos":
+            self.reply_json(200, opcoes_de_modelo(self.server))
         elif path == "/api/proc/exemplo":
             try:
                 texto = EXEMPLO.read_text(encoding="utf-8")
@@ -285,6 +303,8 @@ class ProcHandler(base.StudyHandler):
             self.reply_json(200, proc.write_file(root, payload.get("path"), payload.get("conteudo")))
         elif path == "/api/proc/arquivo/apagar":
             self.reply_json(200, proc.delete_file(root, payload.get("path")))
+        elif path == "/api/proc/modelo":
+            self.reply_json(200, proc.definir_modelo(root, payload.get("agente"), payload.get("modelo")))
         elif path == "/api/proc/previa":
             self.reply_json(200, proc.preview(proc.prepare(root, payload, self.server.politica_atual())))
         elif path == "/api/proc/iniciar":

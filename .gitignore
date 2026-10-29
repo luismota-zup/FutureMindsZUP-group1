@@ -11,3 +11,6 @@ __pycache__/
 .env.*
 /projetcEx/.venv
 .DS_Store
+
+# Relatórios HTML gerados a cada lote (podem conter dados do dataset)
+relatorio/

@@ -147,7 +147,7 @@ def list_files(root: Path) -> dict:
             except (OSError, UnicodeDecodeError):
                 continue
             items.append({"path": rel, "existe": True, "nome": path.stem,
-                          "descricao": info["description"][:200]})
+                          "descricao": info["description"][:200], "model": info["model"]})
     return {"arquivos": items}
 
 
@@ -183,6 +183,39 @@ def write_file(root: Path, rel: str, content: object) -> dict:
     except OSError:
         raise ProcError(500, "Não foi possível gravar o arquivo.") from None
     return {"path": rel, "caracteres": len(content)}
+
+
+def definir_modelo(root: Path, agente: object, modelo: object) -> dict:
+    """Grava o `model:` do cabeçalho do agente (vazio remove a linha e volta ao modelo do servidor).
+
+    Só a linha `model:` muda; o restante do arquivo fica como está. Passa por write_file, então vale a mesma
+    validação e a mesma escrita atômica da edição pela página.
+    """
+    if not isinstance(agente, str) or not AGENT_NAME.fullmatch(agente):
+        raise ProcError(400, "Agente inválido.")
+    if not isinstance(modelo, str):
+        raise ProcError(400, "Modelo inválido.")
+    modelo = modelo.strip()
+    if modelo and not MODEL_NAME.fullmatch(modelo):
+        raise ProcError(400, "Modelo inválido: use haiku, sonnet, opus ou o ID do modelo (letras, números, . _ : / -).")
+    rel = f".claude/agents/{agente}.md"
+    if read_text(root, rel) is None:
+        raise ProcError(404, f"O agente “{agente}” não existe em .claude/agents.")
+    try:  # em bytes: read_text converte \r\n em \n, e regravar assim trocaria o fim de linha do arquivo todo
+        texto = resolve_editable(root, rel).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        raise ProcError(500, "Não foi possível ler o arquivo.") from None
+    cabecalho = re.match(r"(---\r?\n)(.*?)(\r?\n---[ \t]*(?:\r?\n|\Z))(.*)\Z", texto, re.S)
+    if not cabecalho:
+        raise ProcError(400, f"O agente “{agente}” está sem cabeçalho (--- ... ---) para guardar o modelo.")
+    inicio, miolo, fim, corpo = cabecalho.groups()
+    quebra = "\r\n" if "\r\n" in inicio else "\n"
+    linhas = [ln for ln in miolo.split(quebra) if not re.match(r"\s*model\s*:", ln)]
+    if modelo:
+        posicao = next((i + 1 for i, ln in enumerate(linhas) if re.match(r"\s*description\s*:", ln)), len(linhas))
+        linhas.insert(posicao, f"model: {modelo}")
+    write_file(root, rel, inicio + quebra.join(linhas) + fim + corpo)
+    return {"agente": agente, "model": modelo}
 
 
 def delete_file(root: Path, rel: str) -> dict:
@@ -919,6 +952,7 @@ class Job:
         self.nota_relatorio: str | None = None
         self.criado = self.inicio = time.time()
         self.fim: float | None = None
+        self.arquivo_relatorio: Path | None = None  # preenchido quando o relatório HTML é gravado em disco
         for problema in plan["csv"]["problemas"]:
             self.add({"id": problema["id"], "status": "falha", "campos": None,
                       "motivo": problema["motivo"], "origem": self.origem({})})
@@ -1093,7 +1127,7 @@ def executar_relatorio(job: Job, plan: dict, call_model) -> None:
     job.set_nota(f"O agente do relatório não gerou recomendações: {erro}")
 
 
-def run_job(job: Job, plan: dict, call_model) -> None:
+def run_job(job: Job, plan: dict, call_model, pasta_relatorio: Path | None = None) -> None:
     try:
         try:
             import grafo
@@ -1101,6 +1135,8 @@ def run_job(job: Job, plan: dict, call_model) -> None:
             raise JobAbort("A orquestração depende do LangGraph: instale o requirements.txt e reinicie o servidor.") from None
         grafo.executar_lote(job, plan, call_model)
         job.finish("concluido")
+        if pasta_relatorio is not None:
+            job.arquivo_relatorio = salvar_relatorio(job, pasta_relatorio)
     except Cancelled:
         job.finish("cancelado")
     except JobAbort as problema:
@@ -1110,9 +1146,10 @@ def run_job(job: Job, plan: dict, call_model) -> None:
 
 
 class JobManager:
-    def __init__(self):
+    def __init__(self, pasta_relatorio: Path | None = None):
         self.jobs: dict[str, Job] = {}
         self.lock = threading.Lock()
+        self.pasta_relatorio = pasta_relatorio  # se definida, cada lote concluído grava o relatório HTML aqui
 
     def start(self, plan: dict, call_model) -> Job:
         job = Job(plan)
@@ -1125,7 +1162,7 @@ class JobManager:
                     break
                 if antigo.status != "executando":
                     del self.jobs[antigo.id]
-        threading.Thread(target=run_job, args=(job, plan, call_model), daemon=True).start()
+        threading.Thread(target=run_job, args=(job, plan, call_model, self.pasta_relatorio), daemon=True).start()
         return job
 
     def get(self, job_id: str) -> Job:
@@ -1447,3 +1484,20 @@ def render_output(job: Job, formato: str) -> tuple[bytes, str, str]:
     if formato == "html":
         return render_html(rel).encode("utf-8"), "text/html; charset=utf-8", "relatorio.html"
     return render_markdown(rel).encode("utf-8"), "text/markdown; charset=utf-8", "relatorio.md"
+
+
+def salvar_relatorio(job: Job, pasta: Path) -> Path | None:
+    """Grava o relatório HTML do lote em `pasta`; falha de disco vira nota no relatório, nunca derruba o lote."""
+    try:
+        corpo, _, _ = render_output(job, "html")
+        nome = f"relatorio-{datetime.fromtimestamp(job.fim or time.time()).strftime('%Y%m%d-%H%M%S')}-{job.id[:6]}.html"
+        pasta.mkdir(parents=True, exist_ok=True)
+        destino = pasta / re.sub(r"[^A-Za-z0-9._-]", "_", nome)
+        temp = destino.with_name(destino.name + ".tmp")
+        temp.write_bytes(corpo)
+        os.replace(temp, destino)
+        return destino
+    except Exception:  # noqa: BLE001 - o relatório na página e o download continuam funcionando
+        with job.lock:  # em avisos, não em nota: a nota só aparece quando não há recomendações
+            job.avisos.append("Não foi possível gravar o relatório em disco; use “Baixar HTML” na página.")
+        return None

@@ -545,7 +545,8 @@ class SaidaTests(Base):
 class HttpTests(Base):
     def setUp(self):
         super().setUp()
-        self.httpd = servidor.ProcServer(("127.0.0.1", 0), "test-secret", "test-model", root=self.root)
+        self.httpd = servidor.ProcServer(("127.0.0.1", 0), "test-secret", "test-model", root=self.root,
+                                         pasta_relatorio=self.root / "relatorio")  # nunca a pasta real do repositório
         self.origin = f"http://127.0.0.1:{self.httpd.server_port}"
         thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         thread.start()
@@ -643,6 +644,22 @@ class HttpTests(Base):
         self.assertTrue(any("ausentes" in a for a in data["avisos"]))
         self.assertEqual(data["copiar"], ["data_reclamacao", "canal", "status"])
         self.assertTrue(any("não existem neste CSV" in a for a in data["avisos"]))
+
+    def test_rotas_do_seletor_de_modelo(self):
+        self.httpd.provider = "claude"
+        code, body, _ = self.request("/api/proc/modelos")
+        dados = json.loads(body)
+        self.assertEqual((code, dados["padrao"], [o["valor"] for o in dados["opcoes"]]), (200, "test-model", ["haiku", "sonnet", "opus"]))
+        self.assertNotIn(b"test-secret", body)
+        code, body, _ = self.request("/api/proc/modelo", {"agente": "risco", "modelo": "sonnet"})
+        self.assertEqual((code, json.loads(body)), (200, {"agente": "risco", "model": "sonnet"}))
+        arquivos = json.loads(self.request("/api/proc/arquivos")[1])["arquivos"]
+        self.assertEqual(next(f["model"] for f in arquivos if f.get("nome") == "risco"), "sonnet")
+        for ruim in ({"agente": "risco", "modelo": "a b"}, {"agente": "../x", "modelo": "haiku"}, {"agente": "risco"}):
+            self.assertEqual(self.request("/api/proc/modelo", ruim)[0], 400, ruim)
+        self.assertEqual(self.request("/api/proc/modelo", {"agente": "fantasma", "modelo": "haiku"})[0], 404)
+        self.assertEqual(self.request("/api/proc/modelo", {"agente": "risco", "modelo": "opus"}, "https://outro.example")[0], 403)
+        self.assertEqual(self.request("/api/proc/modelos", host="outro.example")[0], 403)
 
     def test_start_without_key_is_refused(self):
         self.httpd.api_key = ""
@@ -799,6 +816,125 @@ class DesafioTests(Base):
         ok = next(r for r in job.linhas if r["id"] == "1")
         self.assertEqual(ok["campos"]["resumo"], "Cliente exige solução.")
         self.assertTrue(any(i["agente"] == "guardrail_saida" and "caixa alta" in i["saida"] for i in job.logs))
+
+
+class RelatorioEmDiscoTests(Base):
+    """O relatório HTML do lote é gravado em disco só quando o servidor informa a pasta."""
+
+    def rodar(self, pasta):
+        plan = proc.prepare(self.root, {"csv": CSV}, POLITICA)
+        job = proc.Job(plan)
+        proc.run_job(job, plan, fake_model, pasta)
+        return job
+
+    def test_grava_o_mesmo_html_do_download(self):
+        pasta = self.root / "saida" / "relatorio"
+        job = self.rodar(pasta)
+        arquivos = list(pasta.glob("relatorio-*.html"))
+        self.assertEqual((job.status, len(arquivos)), ("concluido", 1))
+        self.assertEqual(job.arquivo_relatorio, arquivos[0])
+        gravado = arquivos[0].read_text(encoding="utf-8")
+        self.assertTrue(gravado.startswith("<!doctype html>"))
+        self.assertIn("Relatório gerencial", gravado)
+        self.assertEqual(gravado.encode("utf-8"), proc.render_output(job, "html")[0])
+        self.assertEqual(list(pasta.glob("*.tmp")), [])  # escrita atômica não deixa temporário
+
+    def test_sem_pasta_nao_grava_nada(self):
+        job = self.rodar(None)
+        self.assertEqual(job.status, "concluido")
+        self.assertIsNone(job.arquivo_relatorio)
+        self.assertEqual(list(self.root.rglob("relatorio-*.html")), [])
+
+    def test_lote_cancelado_ou_com_erro_nao_grava(self):
+        pasta = self.root / "saida"
+        plan = proc.prepare(self.root, {"csv": CSV}, POLITICA)
+        job = proc.Job(plan)
+        job.cancel.set()
+        proc.run_job(job, plan, fake_model, pasta)
+        self.assertEqual(job.status, "cancelado")
+        self.assertFalse(pasta.exists())
+
+    def test_falha_de_disco_nao_derruba_o_lote(self):
+        bloqueio = self.root / "arquivo-no-lugar-da-pasta"
+        bloqueio.write_text("x", encoding="utf-8")
+        job = self.rodar(bloqueio)  # mkdir falha: já existe um arquivo com esse nome
+        self.assertEqual(job.status, "concluido")
+        self.assertIsNone(job.arquivo_relatorio)
+        self.assertTrue(any("gravar o relatório em disco" in a for a in proc.relatorio_de(job)["avisos"]))
+        self.assertIn("gravar o relatório em disco", proc.render_output(job, "html")[0].decode("utf-8"))
+
+    def test_gerenciador_repassa_a_pasta_e_o_servidor_aponta_para_relatorio(self):
+        self.assertIsNone(proc.JobManager().pasta_relatorio)
+        self.assertEqual(servidor.RELATORIOS, HERE.parent / "relatorio")
+        self.assertEqual(proc.JobManager(pasta_relatorio=self.root).pasta_relatorio, self.root)
+
+
+class SeletorDeModeloTests(Base):
+    """A página escolhe o modelo de cada agente; a escolha vai para a linha `model:` do cabeçalho do .md."""
+
+    def agente(self, nome):  # em bytes: read_text converteria \r\n e esconderia o que o teste de fim de linha verifica
+        return (self.root / ".claude" / "agents" / f"{nome}.md").read_bytes().decode("utf-8")
+
+    def test_troca_so_a_linha_model_e_preserva_o_resto(self):
+        antes = self.agente("risco")
+        resultado = proc.definir_modelo(self.root, "risco", "sonnet")
+        depois = self.agente("risco")
+        self.assertEqual(resultado, {"agente": "risco", "model": "sonnet"})
+        self.assertEqual(proc.parse_agent("risco", depois)["model"], "sonnet")
+        self.assertEqual(depois.count("model:"), 1)
+        self.assertEqual(antes.replace("model: haiku", "model: sonnet"), depois)  # nenhuma outra linha mudou
+        self.assertEqual(proc.parse_agent("risco", antes)["prompt"], proc.parse_agent("risco", depois)["prompt"])
+
+    def test_vazio_remove_a_linha_e_o_agente_volta_ao_modelo_do_servidor(self):
+        proc.definir_modelo(self.root, "risco", "")
+        texto = self.agente("risco")
+        self.assertNotIn("model:", texto.split("---")[1])
+        self.assertEqual(proc.parse_agent("risco", texto)["model"], "")
+        proc.definir_modelo(self.root, "risco", "claude-opus-5-5")  # ID literal volta a ser aceito
+        self.assertEqual(proc.parse_agent("risco", self.agente("risco"))["model"], "claude-opus-5-5")
+
+    def test_agente_sem_linha_model_ganha_uma_dentro_do_cabecalho(self):
+        proc.write_file(self.root, ".claude/agents/novo.md", "---\nname: novo\ndescription: d\n---\nFaça algo.\n")
+        proc.definir_modelo(self.root, "novo", "haiku")
+        self.assertEqual(self.agente("novo"), "---\nname: novo\ndescription: d\nmodel: haiku\n---\nFaça algo.\n")
+
+    def test_preserva_fim_de_linha_windows(self):
+        proc.write_file(self.root, ".claude/agents/crlf.md", "---\r\nname: crlf\r\ndescription: d\r\n---\r\nFaça algo.\r\n")
+        proc.definir_modelo(self.root, "crlf", "opus")
+        self.assertEqual(self.agente("crlf"), "---\r\nname: crlf\r\ndescription: d\r\nmodel: opus\r\n---\r\nFaça algo.\r\n")
+
+    def test_entradas_hostis_sao_recusadas_sem_tocar_em_arquivo(self):
+        antes = {n: self.agente(n) for n in ("triagem", "risco", "relatorio")}
+        for agente, modelo in (("../server", "haiku"), ("risco", "haiku\nname: outro"), ("risco", "a b"),
+                               ("risco", "x" * 200), ("risco", 5), (None, "haiku"), ("Risco", "haiku"), ("a/b", "haiku")):
+            with self.assertRaises(proc.ProcError, msg=(agente, modelo)):
+                proc.definir_modelo(self.root, agente, modelo)
+        with self.assertRaises(proc.ProcError) as nao_existe:
+            proc.definir_modelo(self.root, "fantasma", "haiku")
+        self.assertEqual(nao_existe.exception.status, 404)
+        self.assertEqual(antes, {n: self.agente(n) for n in antes})
+
+    def test_agente_sem_cabecalho_nao_e_alterado(self):
+        (self.root / ".claude" / "agents" / "seco.md").write_text("Só instruções, sem cabeçalho.", encoding="utf-8")
+        with self.assertRaises(proc.ProcError):
+            proc.definir_modelo(self.root, "seco", "haiku")
+        self.assertEqual(self.agente("seco"), "Só instruções, sem cabeçalho.")
+
+    def test_lista_de_arquivos_informa_o_modelo_de_cada_agente(self):
+        proc.definir_modelo(self.root, "risco", "sonnet")
+        modelos = {f["nome"]: f["model"] for f in proc.list_files(self.root)["arquivos"] if f.get("nome")}
+        self.assertEqual((modelos["risco"], modelos["triagem"]), ("sonnet", "haiku"))
+
+    def test_opcoes_trazem_o_id_dos_aliases_e_nao_expoem_a_chave(self):
+        srv = SimpleNamespace(provider="claude", model="claude-padrao", api_key="chave-secreta")
+        ambiente = {"ANTHROPIC_DEFAULT_HAIKU_MODEL": "id-haiku", "ANTHROPIC_DEFAULT_SONNET_MODEL": " id-sonnet "}
+        with patch.object(servidor.Path, "read_text", return_value=json.dumps({"env": ambiente})):
+            dados = servidor.opcoes_de_modelo(srv)
+        self.assertEqual(dados["padrao"], "claude-padrao")
+        self.assertEqual({o["valor"]: o["id"] for o in dados["opcoes"]}, {"haiku": "id-haiku", "sonnet": "id-sonnet", "opus": ""})
+        self.assertNotIn("chave-secreta", json.dumps(dados))
+        openai = servidor.opcoes_de_modelo(SimpleNamespace(provider="openai", model="gpt-x"))
+        self.assertEqual(openai["opcoes"], [])  # aliases só existem no provedor claude
 
 
 class Nivel2Tests(Base):

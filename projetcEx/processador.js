@@ -2,7 +2,7 @@
 // Todo texto do CSV, dos arquivos e do modelo entra na página por textContent, nunca por innerHTML.
 const $ = id => document.getElementById(id);
 const NEW_AGENT = "---\nname: novo-agente\ndescription: O que este agente faz, em uma frase.\n---\nDescreva aqui o papel do agente, o que ele deve preencher e as regras que deve seguir.\n";
-const S = {pipeline: {agentes: [], agente_relatorio: "", campos: [], separador: ",", incluir_claude_md: false, copiar_colunas: [], improprios: []}, files: [], preview: null,
+const S = {pipeline: {agentes: [], agente_relatorio: "", campos: [], separador: ",", incluir_claude_md: false, copiar_colunas: [], improprios: []}, files: [], models: {padrao: "", provider: "", opcoes: []}, preview: null,
   job: null, shown: 0, timer: null, editorDirty: false, csvName: "", dirtyRules: false, format: "csv"};
 let toastTimer;
 
@@ -184,6 +184,37 @@ async function loadFiles() {
 
 function agentFiles() { return S.files.filter(f => f.nome); }
 
+// ---------------------------------------------------------------- modelo por agente
+// A escolha é gravada na linha `model:` do cabeçalho de .claude/agents/<nome>.md; vazio usa o modelo do servidor.
+const OUTRO = "__outro__";
+
+async function loadModels() {
+  try { S.models = await api("/api/proc/modelos"); } catch { S.models = {padrao: "", provider: "", opcoes: []}; }
+}
+
+function modelSelect(f) {
+  const opcoes = S.models.opcoes, atual = f.model || "";
+  const select = el("select", {class: "model-select", "aria-label": "Modelo do agente " + f.nome},
+    el("option", {value: "", text: "Padrão do servidor" + (S.models.padrao ? " (" + S.models.padrao + ")" : "")}),
+    ...opcoes.map(o => el("option", {value: o.valor, text: o.valor + (o.id ? " · " + o.id : " · sem ID no settings.json")})),
+    ...(atual && !opcoes.some(o => o.valor === atual) ? [el("option", {value: atual, text: atual})] : []),
+    el("option", {value: OUTRO, text: "Outro modelo…"}));
+  select.value = atual;
+  select.addEventListener("change", async () => {
+    let escolhido = select.value;
+    if (escolhido === OUTRO) {
+      escolhido = (prompt("ID do modelo (letras, números, . _ : / -):", atual) || "").trim();
+      if (!escolhido) { select.value = atual; return; }
+    }
+    try {
+      await api("/api/proc/modelo", {agente: f.nome, modelo: escolhido});
+      f.model = escolhido; invalidatePreview(); renderAgents();
+      toast(f.nome + ": " + (escolhido || "padrão do servidor"));
+    } catch (error) { select.value = atual; toast(error.message); }
+  });
+  return el("label", {class: "model-pick"}, el("small", {text: "Modelo"}), select);
+}
+
 function renderReportSelect() {
   const select = $("report-agent"), current = S.pipeline.agente_relatorio;
   select.replaceChildren(el("option", {value: "", text: "Nenhum"}), ...agentFiles().filter(f => !S.pipeline.agentes.includes(f.nome)).map(f => el("option", {value: f.nome, text: f.nome})));
@@ -203,7 +234,7 @@ function renderAgents() {
       try { await savePipeline(); } catch (error) { toast(error.message); }
     });
     return el("div", {class: "agent-item"}, el("div", {class: "grow"}, el("strong", {text: f.nome}), el("small", {text: f.descricao || "Sem descrição"})),
-      el("label", {}, box, "Usar"), el("button", {class: "secondary mini", type: "button", onclick: () => openEditor(f.path)}, "Editar"));
+      modelSelect(f), el("label", {}, box, "Usar"), el("button", {class: "secondary mini", type: "button", onclick: () => openEditor(f.path)}, "Editar"));
   }) : [el("p", {class: "muted", text: "Nenhum agente em .claude/agents. Crie o primeiro."})]));
   const missing = chosen.filter(n => !list.some(f => f.nome === n));
   $("order").replaceChildren(...(chosen.length ? chosen.flatMap((n, i) => [i ? el("i", {text: "→"}) : null, el("span", {text: n + (missing.includes(n) ? " (arquivo ausente)" : "")})]).filter(Boolean) : [el("span", {text: "Nenhum agente selecionado"})]));
@@ -417,7 +448,7 @@ async function init() {
     if (pipeline.existe) { try { const data = JSON.parse(pipeline.conteudo); S.pipeline = {agentes: data.agentes || [], agente_relatorio: data.agente_relatorio || "", campos: (data.campos || []).map(c => ({padrao: "", max_caracteres: null, ...c})), separador: data.separador || ",", incluir_claude_md: data.incluir_claude_md === true, copiar_colunas: data.copiar_colunas || [], improprios: data.improprios || []}; } catch { toast("regras/pipeline.json está inválido; defina o formato e salve."); } }
     $("separator").value = S.pipeline.separador; $("use-claude-md").checked = S.pipeline.incluir_claude_md;
     $("copy-cols").value = S.pipeline.copiar_colunas.join(", "); $("bad-words").value = S.pipeline.improprios.join("\n");
-    renderFields(); await loadFiles();
+    renderFields(); await loadModels(); await loadFiles();
   } catch (error) { toast(error.message); }
 }
 window.addEventListener("beforeunload", event => { if (S.editorDirty || S.dirtyRules) event.preventDefault(); });

@@ -35,6 +35,8 @@
 .agent-item small{color:var(--muted)}
 .agent-item label{display:flex;gap:7px;align-items:center;font-size:12px}
 .agent-item input{accent-color:var(--green)}
+.agent-item .model-pick{flex-direction:column;align-items:stretch;gap:3px;min-width:190px;max-width:260px}
+.agent-item .model-select{padding:7px 9px;font-size:12px}
 .editor{margin-top:16px;padding:16px;border:1px solid var(--line);border-radius:12px;background:#fbfcf8}
 .card-inner{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .order-row{display:flex;gap:6px;align-items:center;margin:4px 0;font-size:13px}
