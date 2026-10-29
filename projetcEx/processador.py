@@ -753,6 +753,53 @@ def recuperar_politica(plan: dict, agente: dict, row: dict, estado: dict) -> lis
         raise ProcError(503, f"Falha ao consultar a política interna: {detalhe}") from None
 
 
+CITACAO = re.compile(r"\[(\d{1,2}(?:\.\d{1,2}){0,3})\]")
+
+
+def _textos(valor: object) -> list[str]:
+    if isinstance(valor, str):
+        return [valor]
+    if isinstance(valor, dict):
+        return [t for v in valor.values() for t in _textos(v)]
+    if isinstance(valor, list):
+        return [t for v in valor for t in _textos(v)]
+    return []
+
+
+def _citacao_recuperada(citada: str, recebidas: list[str]) -> bool:
+    return any(citada == r or r.startswith(citada + ".") or citada.startswith(r + ".") for r in recebidas)
+
+
+def verificar_grounding(anteriores: dict, fontes: dict) -> list[dict]:
+    """Confere, sem modelo, se as seções citadas como [2.4] estão entre os trechos que o agente recebeu.
+
+    `fontes`: seções recuperadas por agente. Ações imediatas sem seção também são marcadas (risco.md exige)."""
+    problemas = []
+    for agente, recebidas in fontes.items():
+        saida = anteriores.get(agente)
+        if not isinstance(saida, dict):
+            continue
+        citadas = list(dict.fromkeys(c for t in _textos(saida) for c in CITACAO.findall(t)))
+        fora = [c for c in citadas if not _citacao_recuperada(c, recebidas)]
+        acoes = saida.get("acoes_imediatas")
+        sem_secao = sum(1 for a in acoes if isinstance(a, str) and a.strip() and not CITACAO.match(a.strip())) \
+            if isinstance(acoes, list) else 0
+        if fora or sem_secao:
+            problemas.append({"agente": agente, "fora_dos_trechos": fora[:MAX_ITENS_JSON],
+                              "acoes_sem_secao": sem_secao, "recebidas": list(recebidas)})
+    return problemas
+
+
+def descrever_grounding(problema: dict) -> str:
+    partes = []
+    if problema["fora_dos_trechos"]:
+        partes.append("cita " + ", ".join(f"[{c}]" for c in problema["fora_dos_trechos"])
+                      + " fora dos trechos recuperados")
+    if problema["acoes_sem_secao"]:
+        partes.append(f"{problema['acoes_sem_secao']} ação(ões) sem seção da política")
+    return f"agente {problema['agente']}: " + "; ".join(partes)
+
+
 def prepare(root: Path, payload: object, politica=None) -> dict:
     """`politica`: snapshot com recuperar()/rotulo()/info(); o lote termina com a política com que começou."""
     if not isinstance(payload, dict):
@@ -1199,14 +1246,19 @@ def relatorio_de(job: Job) -> dict:
         contagem = Counter(r["campos"][campo["nome"]] for r in ok)
         distribuicoes[campo["nome"]] = [[v, contagem.get(v, 0)] for v in campo["valores"]]
     extras_ok = {r["id"]: _extras_da_linha(r) for r in ok}
+    grounding = [{"id": r["id"], "problemas": [descrever_grounding(p) for p in r.get("grounding") or []]}
+                 for r in ok if r.get("grounding")]
+    sem_respaldo = {g["id"]: "; ".join(g["problemas"]) for g in grounding}
     criticas = []
     for r in ok:
         if _critica(r["campos"]):
             info = extras_ok[r["id"]]
             risco = r["campos"].get("risco")
             texto = limitar(info["parecer"], 600) or r["campos"].get("justificativa")
-            parecer = " · ".join(x for x in (f"Risco {risco}" if risco else "", texto) if x)
-            criticas.append({"id": r["id"], "origem": r["origem"], "campos": r["campos"], **info, "parecer": parecer})
+            aviso = f"Verificar citação: {sem_respaldo[r['id']]}" if r["id"] in sem_respaldo else ""
+            parecer = " · ".join(x for x in (f"Risco {risco}" if risco else "", texto, aviso) if x)
+            criticas.append({"id": r["id"], "origem": r["origem"], "campos": r["campos"], **info, "parecer": parecer,
+                             "grounding": sem_respaldo.get(r["id"], "")})
     criticas.sort(key=lambda c: not c["escalacao"])  # escalação imediata primeiro; o resto na ordem do lote
     escalacoes = sum(1 for info in extras_ok.values() if info["escalacao"])
     contagens = {"fatores de risco": _contagem(i["fatores"] for i in extras_ok.values()),
@@ -1226,6 +1278,9 @@ def relatorio_de(job: Job) -> dict:
         for rotulo, pares in contagens.items():
             if pares:
                 atencao.append(f"Mais frequente em {rotulo}: {pares[0][0]} ({pares[0][1]} caso(s)).")
+        if grounding:
+            atencao.append(f"{len(grounding)} caso(s) citam a política sem respaldo nos trechos recuperados "
+                           f"(ids: {', '.join(g['id'] for g in grounding[:10])}); revise antes de agir.")
     if bloqueadas:
         atencao.append(f"{len(bloqueadas)} mensagem(ns) foram bloqueadas na entrada e não foram analisadas.")
     if falhas:
@@ -1238,8 +1293,9 @@ def relatorio_de(job: Job) -> dict:
     return {
         "gerado_em": datetime.now().strftime("%d/%m/%Y %H:%M"), "duracao_s": duracao, "politica": politica,
         "totais": {"linhas": len(linhas), "analisadas": len(ok), "bloqueadas": len(bloqueadas),
-                   "falhas": len(falhas), "criticas": len(criticas), "escalacoes": escalacoes},
-        "criterio_critico": criterio,
+                   "falhas": len(falhas), "criticas": len(criticas), "escalacoes": escalacoes,
+                   "sem_grounding": len(grounding)},
+        "criterio_critico": criterio, "grounding": grounding,
         "distribuicoes": distribuicoes, "contagens": contagens, "criticas": criticas, "pontos_atencao": atencao,
         "mensagem_chave": sanitizar(mensagem_chave, extras) if mensagem_chave else "",
         "recomendacoes": [sanitizar(x, extras) for x in recomendacoes],
