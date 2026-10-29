@@ -83,7 +83,7 @@ escalacao_imediata é true se houver ao menos um:
 - ameaça de violência.
 encaminhar_para: lista sem repetição, somente destes destinos:
 - Prevenção a Fraudes: FRAUDE Alto ou Crítico.
-- Compliance: FRAUDE Alto ou Crítico; CONFORMIDADE Alto ou Crítico; ou escalacao_imediata true.
+- Compliance: FRAUDE Alto ou Crítico; CONFORMIDADE Alto ou Crítico; escalacao_imediata true; ou urgência Crítica na triagem (política 2.4: toda urgência Crítica escala para Compliance).
 - Jurídico: canal Banco Central ou Procon; menção a Banco Central, Procon, Justiça ou advogado.
 - Comunicação: REPUTACIONAL Alto ou Crítico envolvendo imprensa ou viralização.
 - Marketing: REPUTACIONAL Médio ou maior por redes sociais ou Reclame Aqui. Órgão regulador sozinho não envia a Marketing.
@@ -95,7 +95,7 @@ A gerência do produto é definida pelo sistema. Não a inclua.
 # AÇÕES IMEDIATAS
 acoes_imediatas: até 3 ações, cada uma com até 15 palavras, tiradas dos trechos de <politica_interna> e iniciadas pela seção entre colchetes. Exemplo: "[3.1] Bloquear o cartão e emitir segunda via."
 - Nunca invente ação, prazo ou área que não esteja nos trechos recebidos. Sem trecho aplicável, lista vazia.
-- Priorize as ações ligadas à dimensão de maior risco.
+- Priorize as ações ligadas à dimensão de maior risco. Quando houver trecho do produto (seção 3) que trate o fato relatado, inclua ao menos uma ação dele: é o procedimento mais específico.
 
 # DIVERGÊNCIAS COM A TRIAGEM
 Não corrija a triagem. Registre em divergencias, apenas desta lista:
@@ -175,7 +175,8 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 | Urgência e risco medem coisas diferentes | O prompt separa os dois. Exemplo: REC-2026-00246 (atendimento ruim, ironia) tem urgência Média e risco Baixo |
 | Os quatro pontos de verificação do PDF | Viraram dimensões avaliadas separadamente. Fraude e transação não autorizada formam uma; LGPD, sigilo e regulador formam outra; a escalação é campo próprio. Segurança de pessoas foi adicionada por causa das ameaças do dataset |
 | Combinar dimensões | O nível final é a maior dimensão, mais dois pisos. Regra simples, auditável e recalculável no código |
-| Política 2.4 e 4.3: Compliance em até 2h para canal Banco Central ou Procon e para casos críticos | É o critério de `escalacao_imediata`. Os destinos vêm da política (Prevenção a Fraudes, Compliance, Jurídico, Comunicação, Marketing, TI, atendimento sensível) |
+| Política 2.4 e 4.3: Compliance em até 2h para canal Banco Central ou Procon, e toda urgência Crítica escala para Compliance | É o critério de `escalacao_imediata`, e Compliance entra em `encaminhar_para` sempre que a urgência da triagem for Crítica. Os destinos vêm da política: Prevenção a Fraudes e atendimento sensível (2.4), Jurídico (2.4 e 4.3), TI (3.2), Comunicação e Marketing (4.4) |
+| Política, seção 3: cada produto tem procedimento próprio (contestação de fatura, recálculo de parcelas, reanálise de sinistro) | As ações imediatas incluem ao menos uma ação do produto quando o trecho tratar o fato relatado. A gerência responsável pelo produto (3.1 a 3.5) é definida pelo código, não pelo agente |
 | O RAG da política precisa ter efeito visível | `acoes_imediatas` só aceita ações dos trechos recebidos, com a seção citada. Isso torna o RAG auditável e reduz ações inventadas |
 | O PDF sugere loops de validação | O agente não reescreve a triagem; registra `divergencias`. O orquestrador decide se devolve o caso à triagem uma vez |
 | Ameaça de violência junto de queixa real (ex.: REC-2026-00159) | Mesmo critério da triagem: não bloqueia, classifica a queixa, risco Crítico e destino Segurança |
@@ -239,6 +240,7 @@ Critério de aprovação sugerido: `nivel_risco` correto em pelo menos 8 dos 9 c
 
 Teste em `resultado/resultado_teste_claude-haiku-5-5_esforco_baixo.html`: 5 tickets sorteados do dataset, 3 execuções cada, Claude Haiku 5.5.
 - **Assertividade do risco: 95%** (nível, quatro dimensões, escalação imediata e áreas).
+- **Ações da política:** as ações imediatas citaram o procedimento do produto e do canal: revisão do extrato de 90 dias e TI para falha de app (3.2), recálculo de parcelas (3.3), canal privado para rede social (4.4).
 - **Nível de risco e escalação certos em 12 de 12 chamadas**, sem nenhum caso Crítico rebaixado.
 - **Erro mais repetido:** fraude Médio ou Alto no REC-2026-00574, uma cobrança de serviço que a cliente "não lembra de ter contratado". É discutível, e o nível final (Alto) e a escalação ficaram certos.
 - **Ameaça sem queixa (REC-2026-00283):** quando chega ao agente, sai com segurança Crítico e destino Segurança nas 3 execuções.
@@ -253,15 +255,15 @@ Teste em `resultado/resultado_teste_claude-haiku-5-5_esforco_baixo.html`: 5 tick
 - **Sem raciocínio escrito na resposta:** a explicação fica no parecer e na justificativa.
 
 **Na chamada:**
-- **Prompt caching:** o system prompt (~6.600 tokens, medido no Haiku 5.5) é igual para todos os tickets. Nada variável entra nele; a política vai na mensagem de usuário.
-- **Raciocínio em esforço baixo** (`output_config.effort: "low"`). No teste, desligar o raciocínio barateou o risco em 67%, mas a assertividade caiu de 95% para 81%: o REC-2026-00574 foi rebaixado de Alto para Médio em 1 de 3 execuções, e as dimensões da fraude PIX variaram entre as execuções.
-- **Limite de saída:** `max_tokens` em torno de 3.000. Com raciocínio, a saída média foi de ~2.070 tokens (~1.610 de raciocínio) e a maior foi de ~2.920. Só o JSON chegou a ~600 tokens no caso da fraude PIX (REC-2026-00452): com limite de 600, ele foi cortado no meio, e o caso mais grave sumiu do relatório.
+- **Prompt caching:** o system prompt (~6.700 tokens, medido no Haiku 5.5) é igual para todos os tickets. Nada variável entra nele; a política vai na mensagem de usuário.
+- **Raciocínio em esforço baixo** (`output_config.effort: "low"`). No teste, desligar o raciocínio barateou o risco em 70%, mas a assertividade caiu de 95% para 77%: o REC-2026-00574 foi rebaixado de Alto para Médio em 2 de 3 execuções.
+- **Limite de saída:** `max_tokens` em torno de 4.000. Com raciocínio, a saída média foi de ~2.300 tokens (~1.830 de raciocínio) e a maior foi de ~3.160. Com 3.000, uma resposta foi cortada: o raciocínio gastou ~2.590 tokens e o JSON não terminou. Só o JSON chegou a ~600 tokens no caso da fraude PIX (REC-2026-00452): com limite de 600, ele foi cortado no meio, e o caso mais grave sumiu do relatório.
 - **Temperatura:** o Haiku 5.5 não aceita `temperature=0`. Use o valor padrão.
 - **Saída estruturada:** use o JSON com schema da API para evitar reprocessamento.
 - **Batch para o dataset:** as reclamações não precisam de resposta imediata. A API de lotes custa 50% menos e soma com o cache.
 
 **RAG da política (estruturado por chave):**
-- A política já é organizada por urgência (2.1 a 2.4), produto (3.1 a 3.5) e canal (4.1 a 4.4). A busca usa os campos da triagem como chave, sem banco vetorial: a seção da urgência, a do produto e a do canal, mais a 2.4 se houver sinal de fraude ou vulnerabilidade e a 5 se houver sinal de dados.
+- A Política Interna (POL-SAC-001, versão 2.0) está em `politica_interna.json`, com o texto integral de cada seção. Ela já é organizada por urgência (2.1 a 2.4), produto (3.1 a 3.5) e canal (4.1 a 4.4). A busca usa os campos da triagem como chave, sem banco vetorial: a seção da urgência, a do produto e a do canal, mais a 2.4 se houver sinal de fraude, vulnerabilidade ou ameaça e a 5 se houver sinal de dados pessoais.
 - São de 2 a 4 trechos por ticket, em vez da política inteira em toda chamada.
 - No nível 3, os mesmos trechos podem ir para uma Knowledge Base do Bedrock, sem mudar o prompt.
 
@@ -294,10 +296,10 @@ Custo medido no teste real (média de 15 chamadas):
 
 | Item | Valor |
 |---|---|
-| Entrada por ticket | ~750 tokens (triagem, reclamação e trechos da política) + ~6.600 do system prompt em cache |
-| Saída por ticket | ~2.070 tokens (~1.610 de raciocínio) |
-| Custo por ticket | ~US$ 0,0012 |
-| 500 tickets | ~US$ 0,59 (~US$ 0,30 com a API de lotes). Cada ticket bloqueado antes economiza ~US$ 0,0012 |
+| Entrada por ticket | ~1.070 tokens (triagem, reclamação e trechos da Política Interna) + ~6.700 do system prompt em cache |
+| Saída por ticket | ~2.300 tokens (~1.830 de raciocínio) |
+| Custo por ticket | ~US$ 0,0013 |
+| 500 tickets | ~US$ 0,66 (~US$ 0,33 com a API de lotes). Cada ticket bloqueado antes economiza ~US$ 0,0013 |
 
 Os preços usados são os públicos da API da Anthropic: US$ 0,10 por milhão de tokens de entrada e US$ 0,50 por milhão de saída. **No Bedrock, o preço é definido pela AWS e pode ser diferente.** Confirme em https://aws.amazon.com/bedrock/pricing/ antes de usar no ADR.
 
@@ -307,11 +309,14 @@ Os preços usados são os públicos da API da Anthropic: US$ 0,10 por milhão de
 - É o agente mais caro do fluxo, mas o dataset inteiro sai em menos de US$ 1.
 - Cerca de 69% do custo é raciocínio, cobrado como saída.
 
-**Alternativas:**
+**Alternativas testadas** (mesmos 5 tickets, 3 execuções, Política Interna completa, raciocínio em esforço baixo quando disponível):
 
-| Modelo | Entrada / saída por 1M tokens | Quando considerar |
-|---|---|---|
-| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | US$ 2 / US$ 10 | Segunda opinião em casos com `nivel_risco` Crítico e `confianca` Baixa, se um teste maior mostrar rebaixamentos. Custa cerca de 20 vezes o Haiku |
-| Claude Opus 5.5 (`claude-opus-5-5`) | US$ 4 / US$ 20 | Casos ambíguos de LGPD e sigilo, se o Sonnet também errar. Custa cerca de 40 vezes o Haiku |
+| Modelo | Entrada / saída por 1M tokens | Assertividade | Custo por chamada | 500 tickets | Quando considerar |
+|---|---|---|---|---|---|
+| **Claude Haiku 5.5** (escolhido) | US$ 0,10 / US$ 0,50 | 95% | ~US$ 0,0013 | ~US$ 0,66 | Padrão |
+| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | US$ 2 / US$ 10 | 81% | ~US$ 0,0087 (6,6x) | ~US$ 4,36 | Não recomendado. Sem raciocínio, rebaixou o REC-2026-00574 de Alto para Médio em 2 de 3 execuções e, em uma, escreveu uma correção depois do JSON ("Ajuste: o nível de risco deve ser a maior dimensão..."), quebrando a saída |
+| Claude Opus 5.5 (`claude-opus-5-5`) | US$ 4 / US$ 20 | 89% | ~US$ 0,0230 (17x) | ~US$ 11,50 | Segunda opinião em casos ambíguos de LGPD ou sigilo, se um teste maior mostrar erros do Haiku. Os erros dele no teste foram discutíveis (fraude Alto em serviço não reconhecido), nunca rebaixamento de caso Crítico |
+
+Neste gateway, o Sonnet 5.5 não usou raciocínio em nenhuma configuração testada (`effort` baixo ou médio, `thinking` habilitado): devolveu zero tokens de raciocínio. O Opus 5.5 raciocinou pouco, de 100 a 300 tokens por chamada. Os preços são os públicos da Anthropic; no Bedrock podem ser diferentes.
 
 **Antes de fechar no ADR:** rode os 9 casos de aceitação e mais 20 a 30 reclamações com `testar_pipeline.py`. Critério para manter o Haiku: `nivel_risco` correto em pelo menos 90% dos casos e 100% dos casos Crítico.

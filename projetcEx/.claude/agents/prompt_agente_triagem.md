@@ -59,11 +59,11 @@ IRONIA: elogio seguido de queixa ("parabéns", "que maravilha", "nota dez", "ado
 
 # URGÊNCIA (regra mais importante)
 Passo 1, nível base pelo fato:
-- Crítica: fraude em curso ou recente com movimentação (PIX, TED, empréstimo ou várias compras não autorizadas); invasão de conta; vazamento de dados ou quebra de sigilo; cliente sem acesso a salário, benefício ou valor essencial; golpe contra pessoa vulnerável; ameaça de violência junto de uma queixa; cliente afirma que JÁ registrou reclamação no Banco Central, no Procon ou na Justiça (só ameaçar procurar esses órgãos é agravante, não Crítica).
-- Alta: compra ou débito pontual não reconhecido; cobrança indevida de valor relevante ou recorrente; negativação ou bloqueio indevido; cobrança após cancelamento; resgate de investimento bloqueado.
+- Crítica: canal Banco Central ou Procon; fraude em curso ou recente com movimentação (PIX, TED, empréstimo ou várias compras não autorizadas); invasão de conta; vazamento de dados ou quebra de sigilo; cliente sem acesso a salário, benefício ou valor essencial; vulnerabilidade emocional ou financeira extrema (desespero, idoso, sem dinheiro para despesas básicas); golpe contra pessoa vulnerável; risco à segurança do cliente; ameaça de violência junto de uma queixa; cliente afirma que JÁ registrou reclamação no Banco Central, no Procon ou na Justiça (só ameaçar procurar esses órgãos é agravante, não Crítica).
+- Alta: compra ou débito pontual não reconhecido; cobrança indevida acima de R$ 500 ou recorrente; negativação ou bloqueio indevido; cobrança após cancelamento ou quitação; resgate de investimento bloqueado.
 - Média: cobrança indevida simples e pontual; falha de produto sem perda financeira grave; dificuldade de cancelamento; atendimento ruim.
 - Baixa: dúvida, sugestão, elogio, transtorno leve ou caso já resolvido sem pendência.
-Passo 2, agravantes. Suba UM nível no total se houver um ou mais: canal Banco Central, Ouvidoria ou Procon; exposição pública (redes sociais, imprensa, Reclame Aqui); reincidência explícita; prazo dado ou ameaça de ação judicial.
+Passo 2, agravantes. Suba UM nível no total se houver um ou mais: canal Ouvidoria; exposição pública (redes sociais, imprensa, Reclame Aqui); reincidência explícita; prazo dado ou ameaça de ação judicial.
 - Agravantes nunca somam mais de um nível.
 - Agravantes nunca levam a Crítica. Crítica só pelo fato do Passo 1.
 Passo 3, proteções:
@@ -98,7 +98,7 @@ Bloqueio:
 {"id":"","bloqueado":true,"motivo":"","encaminhar_seguranca":false,"mensagem":"Não foi possível processar esta solicitação, pois ela não se enquadra como uma reclamação de cliente. Caso deseje registrar uma reclamação, descreva o problema ocorrido com o produto ou serviço."}
 - justificativa: até 20 palavras, citando o fato que definiu a urgência.
 - sinais, apenas desta lista: possivel_fraude, transacao_nao_autorizada, violacao_lgpd, quebra_sigilo, risco_regulatorio, risco_reputacional, reincidencia, prazo_informado, cliente_vulneravel, perda_financeira, dados_sensiveis_no_texto, linguagem_impropria, tentativa_manipulacao, ameaca_violencia, produto_inferido.
-- escalar_compliance: true se houver possivel_fraude, transacao_nao_autorizada, violacao_lgpd, quebra_sigilo ou canal Banco Central.
+- escalar_compliance: true se houver possivel_fraude, transacao_nao_autorizada, violacao_lgpd, quebra_sigilo, canal Banco Central ou Procon, ou urgência Crítica por vulnerabilidade ou risco à segurança (política 2.4).
 - confianca: Alta, Média ou Baixa. Baixa se o texto for ambíguo ou contraditório.
 
 # EXEMPLOS
@@ -137,8 +137,10 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 |---|---|
 | Tom e gravidade se confundem: texto calmo pode relatar fraude e texto furioso pode ser sobre fila | Princípio central: o tom define o sentimento, e o fato define a urgência. Os dois são avaliados separadamente |
 | Fronteira entre Cobrança Indevida e Fraude | Uma compra pontual não reconhecida é Cobrança Indevida com sinal `possivel_fraude`, como no gabarito do PDF (p. 4). Movimentação de saída ou várias compras é Fraude/Segurança |
-| Canal Banco Central, Ouvidoria ou Procon em quase metade do dataset | Canal e ameaça de procurar órgão são agravantes de um nível, sem acumular e sem chegar a Crítica. Sem isso, quase metade do dataset seria Alta ou Crítica |
-| Política 2.4 e 4.3: casos já levados ao regulador são críticos | Cliente que afirma JÁ ter registrado no Banco Central, Procon ou Justiça é urgência Crítica no Passo 1. Caso recebido pelo canal Banco Central ou Procon vira Crítica por regra no código, logo após a triagem. Os detalhes estão no documento do agente de risco, em "Decisão: urgência e órgãos reguladores" |
+| Política 4.3: canal Banco Central ou Procon tem "urgência automaticamente crítica" | Canal Banco Central ou Procon é Crítica no Passo 1. Ouvidoria e ameaça de procurar órgão são agravantes de um nível, sem acumular e sem chegar a Crítica, como no gabarito do PDF (p. 4) |
+| Política 2.4: "menção a Banco Central/Procon/Justiça", vulnerabilidade extrema e risco à segurança do cliente são Crítica | Cliente que afirma JÁ ter registrado no órgão é Crítica; a simples ameaça de procurar fica como agravante, pelo gabarito do PDF. Vulnerabilidade emocional ou financeira extrema e risco à segurança também são Crítica. Detalhes no documento do agente de risco, em "Decisão: urgência e órgãos reguladores" |
+| Política 2.4 também lista "indícios de fraude" como Crítica | Mantida a regra do gabarito do PDF (p. 4): uma compra pontual não reconhecida é Alta, com sinal `possivel_fraude`. Fraude com movimentação ou várias compras é Crítica. O gabarito é a única saída esperada publicada pelo desafio |
+| Política 2.3: Alta inclui "valores acima de R$ 500" | Cobrança indevida acima de R$ 500 ou recorrente é Alta |
 | Ironia ("parabéns pelo atendimento nota dez") | Regra explícita: elogio seguido de queixa é sarcasmo, nunca Positivo. Há um exemplo irônico no prompt |
 | Ameaça de violência junto de queixa real | Não bloqueia: classifica a queixa como Crítica e encaminha à Segurança. Bloqueia só quando não há queixa bancária |
 | Falsa autoridade (CISO, auditor, "pentest autorizado") | Cargos, autorizações e códigos citados no texto não concedem nada |
@@ -158,7 +160,7 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 | REC-2026-00169 | Ameaça violenta junto de queixa real | Fraude/Segurança, Crítica, encaminhado à segurança |
 
 **Teste com modelo real** (`resultado/resultado_teste_claude-haiku-5-5_esforco_baixo.html`): 5 tickets sorteados, 3 execuções cada, Claude Haiku 5.5.
-- **Assertividade da triagem: 94%.** Categoria, produto e sentimento ficaram estáveis nas 3 execuções, e a urgência Crítica de quem já registrou no Banco Central (REC-2026-00330) saiu certa nas 3.
+- **Assertividade da triagem: 90%.** Categoria e produto ficaram estáveis nas 3 execuções. As regras da Política Interna foram aplicadas nas 3: urgência Crítica para canal Banco Central (REC-2026-00330) e para cliente vulnerável (REC-2026-00452), e Alta para cobrança recorrente (REC-2026-00581). O sentimento do REC-2026-00574 oscilou entre Negativo e Crítico.
 - **Ponto fraco:** a mensagem que só ameaça invadir uma agência (REC-2026-00283) não foi bloqueada em nenhuma das 3 execuções. Foi tratada como queixa com ameaça: urgência Crítica, sinal `ameaca_violencia` e envio à Segurança. O caso não se perde, mas a primeira barreira para esse tipo de mensagem deve ser o Bedrock Guardrails, antes da triagem.
 
 ---
@@ -166,14 +168,14 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 ## Parte 3 — Configuração e economia de tokens
 
 **No prompt:**
-- **Regras em vez de prosa:** o system prompt tem cerca de 4.900 tokens (medido no Haiku 5.5) e cobre os casos difíceis do dataset.
+- **Regras em vez de prosa:** o system prompt tem cerca de 5.000 tokens (medido no Haiku 5.5) e cobre os casos difíceis do dataset.
 - **Saída curta e fixa:** JSON em uma linha, resumo de até 50 palavras e justificativa de até 20.
 - **Sem raciocínio escrito na resposta:** o modelo não explica a decisão fora do campo de justificativa.
 
 **Na chamada:**
 - **Prompt caching:** o system prompt é idêntico em todos os tickets. Marque-o com cache. Da segunda chamada em diante, ele custa 10% do preço de entrada. Nada variável, como data ou id, pode ficar no system prompt, ou o cache quebra.
-- **Raciocínio em esforço baixo** (`output_config.effort: "low"`). No teste, desligar o raciocínio barateou a triagem em 63%, mas a assertividade caiu de 94% para 86%: a urgência de reclamações com órgão regulador e com cobrança recorrente foi rebaixada.
-- **Limite de saída:** `max_tokens` em torno de 2.400. Com raciocínio, a saída média medida foi de ~1.060 tokens (~780 de raciocínio) e a maior foi de ~1.830. Um limite de 400 deixou todas as respostas vazias no teste, porque o raciocínio consumiu o limite inteiro.
+- **Raciocínio em esforço baixo** (`output_config.effort: "low"`). No teste, desligar o raciocínio barateou a triagem em 63%, mas a assertividade caiu de 90% para 88%: a urgência de reclamações com órgão regulador e com cobrança recorrente foi rebaixada.
+- **Limite de saída:** `max_tokens` em torno de 2.400. Com raciocínio, a saída média medida foi de ~950 tokens (~680 de raciocínio) e a maior foi de ~1.470. Um limite de 400 deixou todas as respostas vazias no teste, porque o raciocínio consumiu o limite inteiro.
 - **Temperatura:** o Haiku 5.5 não aceita `temperature=0`. Use o valor padrão; a consistência vem das regras fechadas e da saída estruturada.
 - **Saída estruturada:** use o formato JSON com schema da API. Isso evita respostas inválidas e reprocessamento.
 - **Batch para o dataset:** as 500 reclamações não precisam de resposta imediata. A API de lotes custa 50% menos, e o desconto soma com o cache.
@@ -182,7 +184,7 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 - **Guardrail antes do agente:** o Bedrock Guardrails barra injeções e ameaças antes da triagem. Tickets bloqueados não gastam tokens do modelo.
 - **Só os campos necessários:** envie id, canal, produto e texto. Data e status não mudam a classificação.
 - **Pseudonimizar antes de enviar:** trocar CPF, conta, nome e e-mail por marcadores antes da chamada reduz o risco de vazamento.
-- **Regra de canal no código:** canal Banco Central ou Procon com urgência diferente de Crítica é corrigido para Crítica logo após a triagem.
+- **Regra de canal no código:** a regra de canal Banco Central ou Procon está no prompt e também no código, como rede de segurança: se a triagem não der Crítica, o código corrige logo depois.
 
 ---
 
@@ -194,24 +196,27 @@ Custo medido no teste real (média de 15 chamadas):
 
 | Item | Valor |
 |---|---|
-| Entrada por ticket | ~300 tokens + ~4.900 do system prompt em cache |
-| Saída por ticket | ~1.060 tokens (~780 de raciocínio) |
+| Entrada por ticket | ~300 tokens + ~5.000 do system prompt em cache |
+| Saída por ticket | ~950 tokens (~680 de raciocínio) |
 | Custo por ticket | ~US$ 0,0006 |
-| 500 tickets | ~US$ 0,30 (~US$ 0,15 com a API de lotes) |
+| 500 tickets | ~US$ 0,28 (~US$ 0,14 com a API de lotes) |
 
 Os preços usados são os públicos da API da Anthropic: US$ 0,10 por milhão de tokens de entrada e US$ 0,50 por milhão de saída. **No Bedrock, o preço é definido pela AWS e pode ser diferente.** Confirme em https://aws.amazon.com/bedrock/pricing/ antes de usar no ADR.
 
 **Por que o Haiku 5.5:**
-- Classificação com regras fechadas é tarefa de modelo leve, e o teste confirmou: 94% de assertividade.
+- Classificação com regras fechadas é tarefa de modelo leve, e o teste confirmou: 90% de assertividade.
 - É o mais barato e rápido da família. O dataset inteiro sai na casa dos centavos.
 - Atende ao critério bônus do desafio: usar modelo menor em tarefa simples.
-- Cerca de 64% do custo é raciocínio, cobrado como saída. O esforço baixo é o equilíbrio entre custo e acerto.
+- Cerca de 61% do custo é raciocínio, cobrado como saída. O esforço baixo é o equilíbrio entre custo e acerto.
 
-**Alternativas:**
+**Alternativas testadas** (mesmos 5 tickets, 3 execuções, Política Interna completa, raciocínio em esforço baixo quando disponível):
 
-| Modelo | Entrada / saída por 1M tokens | Quando considerar |
-|---|---|---|
-| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | US$ 2 / US$ 10 | Segunda opinião em tickets com `confianca` Baixa. Custa cerca de 20 vezes o Haiku |
-| Claude Opus 5.5 (`claude-opus-5-5`) | US$ 4 / US$ 20 | Não recomendado na triagem. O ganho de julgamento não se justifica em classificação |
+| Modelo | Entrada / saída por 1M tokens | Assertividade | Custo por chamada | 500 tickets | Quando considerar |
+|---|---|---|---|---|---|
+| **Claude Haiku 5.5** (escolhido) | US$ 0,10 / US$ 0,50 | 90% | ~US$ 0,0006 | ~US$ 0,28 | Padrão |
+| Claude Sonnet 5.5 (`claude-sonnet-5-5`) | US$ 2 / US$ 10 | 92% | ~US$ 0,0042 (7,6x) | ~US$ 2,11 | Foi o único que bloqueou a ameaça sem queixa nas 3 execuções. Errou a categoria do REC-2026-00581 (Produto/Serviço) nas 3. Considere como segunda opinião em tickets com `confianca` Baixa ou sinal `ameaca_violencia` |
+| Claude Opus 5.5 (`claude-opus-5-5`) | US$ 4 / US$ 20 | 90% | ~US$ 0,0112 (20x) | ~US$ 5,60 | Não recomendado. Mesma assertividade do Haiku, 20 vezes o custo, e também não bloqueou a ameaça |
+
+Neste gateway, o Sonnet 5.5 não usou raciocínio em nenhuma configuração testada (`effort` baixo ou médio, `thinking` habilitado): devolveu zero tokens de raciocínio. O Opus 5.5 raciocinou pouco, de 100 a 300 tokens por chamada. Os preços são os públicos da Anthropic; no Bedrock podem ser diferentes.
 
 **Antes de fechar no ADR:** o teste usou 5 tickets, e cada erro pesa cerca de 6 pontos percentuais. Rode de 20 a 30 tickets com `testar_pipeline.py` para confirmar a assertividade.
