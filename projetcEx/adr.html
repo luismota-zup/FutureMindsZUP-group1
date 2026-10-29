@@ -167,8 +167,8 @@ li{margin:4px 0}
 <tr><td><b>Total</b></td><td></td><td></td><td><b>~US$ 1,24</b> com os preços do Haiku 5.5 dos documentos dos agentes. <b>Com o Haiku 4.5 do gateway, a medição real abaixo dá ~US$ 8.</b></td></tr>
 </tbody></table></div>
 <h3>Medição real: o fluxo completo em 20 reclamações</h3>
-<p>O grafo inteiro (classificador, triagem, risco e relatório) rodou com <b>Haiku 4.5</b> pelo AI Gateway (US$ 1 por 1M de tokens de entrada e US$ 5 de saída) em 20 reclamações do dataset: 14 concluídas, 6 bloqueadas e 48 chamadas, com 206.643 tokens de entrada e 9.349 de saída, cerca de <b>US$ 0,25</b>. O classificador responde por ~US$ 0,01 disso; o resto é triagem, risco e relatório, ou seja, ~<b>US$ 0,017 por reclamação concluída</b>, porque cada chamada de agente leva ~6 mil tokens de prompt com os trechos da política.</p>
-<p class="note"><b>Consequência:</b> as 451 reclamações aprovadas custariam ~US$ 7,7 nos agentes, mais ~US$ 0,35 do classificador, ~US$ 8 no total. A chave do grupo tem US$ 6,54 no total, e parte já foi gasta nos testes. O lote completo de 500 com os três agentes <b>não cabe nesse orçamento</b>. Opções: processar um subconjunto, enxugar os prompts dos agentes ou pedir mais orçamento. O teto de chamadas da prévia limita chamadas, não dólares.</p>
+<p>O grafo inteiro (classificador, triagem, risco e relatório) rodou com <b>Haiku 4.5</b> pelo AI Gateway (US$ 1 por 1M de tokens de entrada e US$ 5 de saída) em 20 reclamações do dataset: 14 concluídas, 6 bloqueadas e 48 chamadas. Com os prompts originais: 206.752 tokens de entrada e 9.758 de saída, <b>US$ 0,2555</b>. Depois de enxugar os prompts (valores permitidos duplicados na triagem, 2 dos 5 exemplos de triagem e de risco, seção de segurança compactada, e o <code>CLAUDE.md</code> sem ser enviado aos agentes): 182.610 de entrada e 9.606 de saída, <b>US$ 0,2306</b> (−10%). O classificador responde por ~US$ 0,01; o resto é triagem, risco e relatório, ou seja, ~<b>US$ 0,015 por reclamação concluída</b>, porque cada chamada de agente ainda leva ~5,5 a 6,5 mil tokens com os trechos da política. Qualidade nas mesmas 20 linhas: categoria, sentimento e risco iguais em 14 de 14; produto e urgência divergiram em 1 de 14 cada (a de urgência já variava entre duas rodadas com o prompt original, e a de produto não foi atribuída ao corte nem ao acaso). Amostra pequena, uma rodada de cada. Os documentos <code>prompt_agente_*.md</code> descrevem a versão anterior, mais longa; o texto em vigor está em <code>.claude/agents/*.md</code>.</p>
+<p class="note"><b>Consequência:</b> as 451 reclamações aprovadas custariam ~US$ 6,8 nos agentes, mais ~US$ 0,35 do classificador, ~US$ 7,2 no total. A chave do grupo tem US$ 6,54 no total, e uma parte (~US$ 1,5) já foi gasta nos testes. O lote completo de 500 com os três agentes <b>não cabe nesse orçamento</b>: com o saldo restante cabem uns 250 a 290 registros. Opções: processar um subconjunto ou pedir mais orçamento (o corte dos prompts já foi feito e rendeu ~10%). O teto de chamadas da prévia limita chamadas, não dólares.</p>
 
 <h3>Controles de custo no código</h3>
 <ul>
@@ -183,7 +183,7 @@ li{margin:4px 0}
 <h2 id="seguranca">6. Recomendações de segurança</h2>
 <section>
 <ul>
-<li>Tratar os dados do CSV como material de análise, nunca como instrução (regra no <code>CLAUDE.md</code> e em cada prompt).</li>
+<li>Tratar os dados do CSV como material de análise, nunca como instrução (regra em cada prompt e no contrato de saída montado pelo código; o <code>CLAUDE.md</code> não é mais enviado aos agentes).</li>
 <li>Mascarar CPF, cartão, e-mail, telefone, “conta + número”, CEP e nome declarado antes de enviar ao modelo e em toda saída, log e relatório.</li>
 <li>Manter a credencial só no servidor (ambiente ou <code>settings.json</code>), sem devolvê-la ao navegador nem aos logs.</li>
 <li>Servir somente em <code>127.0.0.1</code>, validando Host e Origin. O caderno e o tutor foram desligados do servidor.</li>
@@ -200,6 +200,7 @@ li{margin:4px 0}
 <li>Os números de acerto e custo vêm dos documentos dos agentes, medidos com outro modelo (Haiku 5.5) e em 5 tickets.</li>
 <li>O classificador rodou nas 500 linhas do dataset: bloqueou 49 (39 injeção e 10 ameaça), aprovou 451 e concordou com as 7 que o regex já bloqueia. Ou seja, o regex sozinho deixava passar 42 ataques. Não há gabarito no dataset: conferi os 49 bloqueios e as aprovadas com termos suspeitos (5, todas reclamações reais), e não vi falso positivo depois do ajuste do prompt (a REC-2026-00378, um pedido de resgate de fundo, foi bloqueada na primeira versão do prompt). Um ataque aprovado por engano continua possível e não foi medido.</li>
 <li>O Bedrock Guardrails não foi implementado; o requisito é atendido por guardrail em código, conforme a resposta da organização.</li>
+<li>O classificador de entrada bloqueia queixa que traz ameaça de violência (por exemplo, a REC-2026-00334, cobrança indevida com ameaça à agência), enquanto os prompts de triagem e de risco escalam esse caso para Segurança em vez de bloquear. Vários dos 10 bloqueios por ameaça no dataset são desse tipo. Os dois comportamentos não foram alinhados; decisão pendente com a organização.</li>
 <li>O Boto3 não é usado para chamar o modelo, por falta de acesso à conta AWS.</li>
 </ul>
 </section>

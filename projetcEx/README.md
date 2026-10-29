@@ -135,7 +135,7 @@ model: sonnet
 - Bedrock Guardrails: o PDF o exige no nível 3 (p. 8), mas o guardrail daqui é em código (regras + classificador por modelo). A organização respondeu que o guardrail pode ser feito via código. O AI Gateway não expõe guardrails para a chave do grupo.
 - Que o classificador acerte sempre: ele é um modelo. Nas 500 linhas do dataset ele bloqueou 49 (39 injeção e 10 ameaça) e aprovou 451; não há gabarito, então ataques aprovados por engano não foram medidos. Com o classificador desligado, detectar conteúdo fora do assunto volta a depender só do agente de triagem.
 - Mascarar nomes citados de outra forma, ou endereços por extenso (só o CEP é mascarado).
-- Que o lote completo caiba no orçamento da chave: medido com o Haiku 4.5 do gateway, cada reclamação concluída custa ~US$ 0,017 nos agentes (~US$ 8 para as 500, contra US$ 6,54 de orçamento). A prévia limita chamadas, não dólares.
+- Que o lote completo caiba no orçamento da chave: medido com o Haiku 4.5 do gateway, cada reclamação concluída custa ~US$ 0,015 nos agentes, já com os prompts enxutos (~US$ 7,2 para as 500, contra US$ 6,54 de orçamento). A prévia limita chamadas, não dólares.
 - A qualidade das respostas dos agentes, que ainda não foram testados com um modelo real.
 - Que a política seja seguida à risca: o RAG entrega os trechos, mas quem decide é o modelo.
 
