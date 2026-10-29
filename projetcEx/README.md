@@ -36,6 +36,7 @@ Sem chave, a edição, a prévia, a política e o relatório funcionam; processa
 | `--model <nome>` | Modelo a usar (padrão: o do provedor) |
 | `--configure` | Pede a chave da OpenAI com entrada oculta; não a grava |
 | `--port <n>` | Porta (padrão 8766) |
+| `--reload` | Desenvolvimento: reinicia o servidor quando um `.py` do projeto, o `server.py` da raiz ou a política indexada mudar. `.html`, `.js`, `.css`, agentes e regras já são lidos do disco a cada uso e não precisam de reinício. Cada reinício reindexa a política. Não combina com `--configure` |
 | `--politica <arquivo>` | Política interna (`.pdf`, `.md` ou `.txt`). Padrão: `Docs - Challenge/KS_POLITICA_INTERNA (4).pdf` |
 | `--embeddings local\|bedrock` | `local`: fastembed multilíngue em `.cache`. `bedrock`: Amazon Titan v2 (exige credencial AWS) |
 
@@ -125,7 +126,7 @@ CSV (colunas na ordem: `id`, colunas copiadas, seus campos), JSON (resultados, f
 Do mais barato ao mais real. Os passos 1 a 3 não gastam tokens.
 
 ```bash
-# 1. Testes automáticos (59 testes; modelo e política simulados, sem rede)
+# 1. Testes automáticos (88 testes; modelo e política simulados, sem rede)
 projetcEx/.venv/bin/python -m unittest discover -s projetcEx/tests -v
 node --check projetcEx/processador.js
 

@@ -11,8 +11,12 @@ import binascii
 import errno
 import getpass
 import json
+import os
+import signal
 import socket
+import subprocess
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -363,6 +367,68 @@ def carregar_politica(server: ProcServer, caminho: Path, embeddings: str) -> Non
     print(f"Política: {politica.rotulo()} · {len(politica.secoes)} seções ({politica.metodo})", flush=True)
 
 
+RELOAD_INTERVALO = 1.0
+RELOAD_IGNORADAS = {"tests", "FM3", "__pycache__"}
+
+
+def instantaneo_arquivos(politica: Path) -> dict[str, float]:
+    """Data de modificação dos .py do projeto, do server.py da raiz e da política indexada."""
+    estado: dict[str, float] = {}
+    candidatos = list(HERE.parent.glob("*.py")) + [politica]
+    for raiz, pastas, arquivos in os.walk(HERE):
+        pastas[:] = [pasta for pasta in pastas if pasta not in RELOAD_IGNORADAS and not pasta.startswith(".")]
+        candidatos += [Path(raiz) / nome for nome in arquivos if nome.endswith(".py")]
+    for caminho in candidatos:
+        try:
+            estado[str(caminho)] = caminho.stat().st_mtime
+        except OSError:
+            continue
+    return estado
+
+
+def encerrar_filho(filho: subprocess.Popen) -> None:
+    if filho.poll() is None:
+        filho.terminate()
+        try:
+            filho.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            filho.kill()
+            filho.wait()
+
+
+def encerrar_por_sinal(numero, quadro):
+    raise KeyboardInterrupt
+
+
+def executar_com_reload(politica: Path) -> None:
+    """Sobe o servidor como processo filho e o reinicia quando um arquivo observado muda."""
+    argumentos = [argumento for argumento in sys.argv[1:] if argumento != "--reload"]
+    comando = [sys.executable, str(Path(__file__).resolve()), *argumentos]
+    signal.signal(signal.SIGTERM, encerrar_por_sinal)
+    estado = instantaneo_arquivos(politica)
+    print("Modo --reload: observando os .py do projeto e a política. Encerre com Ctrl+C.", flush=True)
+    filho = subprocess.Popen(comando)
+    avisou_parado = False
+    try:
+        while True:
+            time.sleep(RELOAD_INTERVALO)
+            novo = instantaneo_arquivos(politica)
+            if novo != estado:
+                estado = novo
+                avisou_parado = False
+                print("\nAlteração detectada. Reiniciando o servidor...", flush=True)
+                encerrar_filho(filho)
+                filho = subprocess.Popen(comando)
+            elif filho.poll() is not None and not avisou_parado:
+                avisou_parado = True
+                print(f"O servidor encerrou (código {filho.returncode}). Aguardando uma alteração para tentar de novo.",
+                      flush=True)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        encerrar_filho(filho)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Processador de CSV com agentes do Claude Code.")
     parser.add_argument("--port", type=int, default=8766)
@@ -375,6 +441,8 @@ def main():
     parser.add_argument("--embeddings", choices=("local", "bedrock"), default="local",
                         help="local: fastembed multilíngue em .cache (sem rede após o 1º download); "
                              "bedrock: Amazon Titan v2 (Nível 3, exige credencial AWS).")
+    parser.add_argument("--reload", action="store_true",
+                        help="Reinicia o servidor quando um .py do projeto ou a política mudar (desenvolvimento).")
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("A porta deve estar entre 1 e 65535.")
@@ -382,6 +450,11 @@ def main():
         parser.error("Informe um modelo válido.")
     if args.configure and args.provider == "claude":
         parser.error("Para Claude, configure a credencial em ~/.claude/settings.json.")
+    if args.reload and args.configure:
+        parser.error("--reload não combina com --configure: a chave seria pedida a cada reinício.")
+    if args.reload:
+        executar_com_reload(args.politica)
+        return
     try:
         config = base.resolve_config("openai" if args.configure else args.provider, args.model)
     except ValueError as error:
