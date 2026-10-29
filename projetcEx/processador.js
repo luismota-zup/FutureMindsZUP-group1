@@ -2,7 +2,7 @@
 // Todo texto do CSV, dos arquivos e do modelo entra na página por textContent, nunca por innerHTML.
 const $ = id => document.getElementById(id);
 const NEW_AGENT = "---\nname: novo-agente\ndescription: O que este agente faz, em uma frase.\n---\nDescreva aqui o papel do agente, o que ele deve preencher e as regras que deve seguir.\n";
-const S = {pipeline: {agentes: [], agente_relatorio: "", campos: [], separador: ",", incluir_claude_md: false, copiar_colunas: [], improprios: []}, files: [], preview: null,
+const S = {pipeline: {agentes: [], agente_relatorio: "", campos: [], separador: ",", incluir_claude_md: false, classificador_entrada: {ativo: false, model: ""}, copiar_colunas: [], improprios: []}, files: [], preview: null,
   job: null, shown: 0, timer: null, editorDirty: false, csvName: "", dirtyRules: false, format: "csv"};
 let toastTimer;
 
@@ -161,6 +161,7 @@ $("bad-words").addEventListener("input", () => { S.pipeline.improprios = $("bad-
 $("report-agent").addEventListener("change", async () => { S.pipeline.agente_relatorio = $("report-agent").value; invalidatePreview(); try { await savePipeline(); } catch (error) { toast(error.message); } });
 $("separator").addEventListener("change", () => { S.pipeline.separador = $("separator").value; S.dirtyRules = true; });
 $("use-claude-md").addEventListener("change", () => { S.pipeline.incluir_claude_md = $("use-claude-md").checked; S.dirtyRules = true; invalidatePreview(); });
+$("use-classifier").addEventListener("change", () => { S.pipeline.classificador_entrada.ativo = $("use-classifier").checked; S.dirtyRules = true; invalidatePreview(); });
 
 async function savePipeline() {
   await api("/api/proc/arquivo", {path: "regras/pipeline.json", conteudo: JSON.stringify(S.pipeline, null, 2) + "\n"});
@@ -338,7 +339,7 @@ $("preview").addEventListener("click", async () => {
       ...(data.amostra ? [el("details", {}, el("summary", {text: "Ver exatamente o que o primeiro agente receberia"}), el("p", {class: "muted", text: "Instruções (system):"}), el("pre", {class: "sample"}, el("code", {text: data.amostra.system})), el("p", {class: "muted", text: "Mensagem (já com dados sensíveis mascarados):"}), el("pre", {class: "sample"}, el("code", {text: data.amostra.user})))] : []));
     box.hidden = false;
     $("cost-note").textContent = data.chamadas_max
-      ? "Serão feitas de " + data.chamadas_base + " a " + data.chamadas_max + " chamadas ao modelo (" + data.executaveis + " linhas × " + data.agentes.length + " agentes" + (data.agente_relatorio ? " + 1 do relatório" : "") + "; o teto inclui 1 nova tentativa por falha). Cerca de " + data.tokens_entrada_estimados.toLocaleString("pt-BR") + " tokens de entrada, estimativa grosseira, mais a saída. O uso segue a cobrança da sua conta."
+      ? "Serão feitas de " + data.chamadas_base + " a " + data.chamadas_max + " chamadas ao modelo (" + data.executaveis + " linhas × " + (data.agentes.length + (data.classificador_entrada.ativo ? 1 : 0)) + " etapas (" + data.agentes.length + " agentes" + (data.classificador_entrada.ativo ? " + guardrail de entrada" : "") + ")" + (data.agente_relatorio ? " + 1 do relatório" : "") + "; o teto inclui 1 nova tentativa por falha). Cerca de " + data.tokens_entrada_estimados.toLocaleString("pt-BR") + " tokens de entrada, estimativa grosseira, mais a saída. O uso segue a cobrança da sua conta."
       : "Nenhuma linha pode ser enviada aos agentes.";
     $("run-box").hidden = !data.chamadas_max;
     $("run").textContent = "Confirmar e processar até " + data.chamadas_max + " chamadas";
@@ -414,8 +415,8 @@ async function init() {
   try {
     const [rules, pipeline] = await Promise.all([api("/api/proc/arquivo?path=regras/regras.md"), api("/api/proc/arquivo?path=regras/pipeline.json")]);
     $("rules-text").value = rules.conteudo;
-    if (pipeline.existe) { try { const data = JSON.parse(pipeline.conteudo); S.pipeline = {agentes: data.agentes || [], agente_relatorio: data.agente_relatorio || "", campos: (data.campos || []).map(c => ({padrao: "", max_caracteres: null, ...c})), separador: data.separador || ",", incluir_claude_md: data.incluir_claude_md === true, copiar_colunas: data.copiar_colunas || [], improprios: data.improprios || []}; } catch { toast("regras/pipeline.json está inválido; defina o formato e salve."); } }
-    $("separator").value = S.pipeline.separador; $("use-claude-md").checked = S.pipeline.incluir_claude_md;
+    if (pipeline.existe) { try { const data = JSON.parse(pipeline.conteudo); S.pipeline = {agentes: data.agentes || [], agente_relatorio: data.agente_relatorio || "", campos: (data.campos || []).map(c => ({padrao: "", max_caracteres: null, ...c})), separador: data.separador || ",", incluir_claude_md: data.incluir_claude_md === true, classificador_entrada: {ativo: (data.classificador_entrada || {}).ativo === true, model: (data.classificador_entrada || {}).model || ""}, copiar_colunas: data.copiar_colunas || [], improprios: data.improprios || []}; } catch { toast("regras/pipeline.json está inválido; defina o formato e salve."); } }
+    $("separator").value = S.pipeline.separador; $("use-claude-md").checked = S.pipeline.incluir_claude_md; $("use-classifier").checked = S.pipeline.classificador_entrada.ativo;
     $("copy-cols").value = S.pipeline.copiar_colunas.join(", "); $("bad-words").value = S.pipeline.improprios.join("\n");
     renderFields(); await loadFiles();
   } catch (error) { toast(error.message); }

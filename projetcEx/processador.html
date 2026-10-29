@@ -64,6 +64,7 @@
 <div class="grid-3">
 <label class="field" for="separator">Separador do CSV de saída<select id="separator"><option value=",">Vírgula (,)</option><option value=";">Ponto e vírgula (;) · Excel em português</option></select></label>
 <label class="check-inline"><input type="checkbox" id="use-claude-md"> Enviar o <code>CLAUDE.md</code> aos agentes</label>
+<label class="check-inline"><input type="checkbox" id="use-classifier"> Classificar a entrada com o modelo antes dos agentes (bloqueia injeção, ameaça e conteúdo que não é reclamação)</label>
 </div>
 <label class="field" for="copy-cols"><span>Colunas do CSV a copiar para o resultado (separe por vírgula)</span><input id="copy-cols" type="text" placeholder="data_reclamacao, canal, status"></label>
 <p class="muted small-note">Essas colunas vão direto da entrada para a saída, sem passar pelo modelo (só pela máscara de dados sensíveis).</p>

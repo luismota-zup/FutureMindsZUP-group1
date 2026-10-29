@@ -54,7 +54,7 @@ Se a indexação falhar, o servidor sobe mesmo assim, mostra um `AVISO` no termi
 
 O lote roda em dois grafos LangGraph, definidos em `grafo.py` e montados a partir do `pipeline.json`:
 
-- **Por reclamação:** `guardrail_entrada` → um nó por agente de `agentes` → `guardrail_saida`.
+- **Por reclamação:** `guardrail_entrada` → `classificador_entrada` (opcional) → um nó por agente de `agentes` → `guardrail_saida`.
   - Arestas condicionais:
     - `bloqueada` vai para `resposta_bloqueio`;
     - `nova_tentativa`: JSON inválido volta ao próprio agente, até 2 chamadas, e reaproveita os trechos da política;
@@ -116,7 +116,8 @@ model: sonnet
 
 ## O que o código garante (sem depender do modelo)
 
-- Linhas com ataque de prompt, ameaça, texto curto ou longo demais são bloqueadas **antes** do modelo, e recebem uma resposta educada sem detalhes internos.
+- Linhas com ataque de prompt, ameaça, texto curto ou longo demais são bloqueadas **antes** do modelo (regras em código), e recebem uma resposta educada sem detalhes internos.
+- Com o **classificador de entrada** ligado (`classificador_entrada` em `regras/pipeline.json`, ligado por padrão), cada linha que passou pelas regras é classificada por um modelo leve em `reclamacao_valida`, `injecao`, `ameaca` ou `fora_escopo`, **antes** dos agentes. Só a reclamação válida segue; as demais viram bloqueadas com a resposta educada. Se o modelo não devolver uma classe válida (duas tentativas), a linha vira `falha` e não é processada. Custa uma chamada a mais por linha, e o log registra o passo como `classificador_entrada`.
 - CPF, cartão, e-mail, telefone e “conta + número” são mascarados antes de ir ao modelo e em toda saída, log e relatório.
 - Campos com valores permitidos só aceitam esses valores. Qualquer outra resposta reprova a linha.
 - Palavras impróprias saem ofuscadas (`m****`) e o resumo é cortado no limite configurado.
@@ -129,7 +130,8 @@ model: sonnet
 
 ## O que NÃO garante
 
-- Bedrock Guardrails: o PDF o exige no nível 3 (p. 8), mas o guardrail daqui é por regras locais, mais a decisão do agente de triagem. Detectar conteúdo fora do assunto depende desse agente. O próprio PDF é ambíguo (cita também tópicos do MS Copilot): confirme com a organização.
+- Bedrock Guardrails: o PDF o exige no nível 3 (p. 8), mas o guardrail daqui é em código (regras + classificador por modelo). A organização respondeu que o guardrail pode ser feito via código. O AI Gateway não expõe guardrails para a chave do grupo.
+- Que o classificador acerte sempre: ele é um modelo. Nas 500 linhas do dataset ele bloqueou 49 (39 injeção e 10 ameaça) e aprovou 451; não há gabarito, então ataques aprovados por engano não foram medidos. Com o classificador desligado, detectar conteúdo fora do assunto volta a depender só do agente de triagem.
 - Mascarar nomes de pessoas ou endereços.
 - A qualidade das respostas dos agentes, que ainda não foram testados com um modelo real.
 - Que a política seja seguida à risca: o RAG entrega os trechos, mas quem decide é o modelo.
@@ -152,7 +154,7 @@ CSV (colunas na ordem: `id`, colunas copiadas, seus campos), JSON (resultados, f
 Do mais barato ao mais real. Os passos 1 a 3 não gastam tokens.
 
 ```bash
-# 1. Testes automáticos (90 testes; modelo e política simulados, sem rede)
+# 1. Testes automáticos (109 testes; modelo e política simulados, sem rede)
 projetcEx/.venv/bin/python -m unittest discover -s projetcEx/tests -v
 node --check projetcEx/processador.js
 

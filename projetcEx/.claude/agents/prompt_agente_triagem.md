@@ -181,7 +181,7 @@ texto: Fui cobrado duas vezes na fatura do cartão e ninguém resolve...
 - **Batch para o dataset:** as 500 reclamações não precisam de resposta imediata. A API de lotes custa 50% menos, e o desconto soma com o cache.
 
 **No fluxo:**
-- **Guardrail antes do agente:** o Bedrock Guardrails barra injeções e ameaças antes da triagem. Tickets bloqueados não gastam tokens do modelo.
+- **Guardrail antes do agente:** o guardrail de entrada (regras em código e classificador por modelo leve) barra injeções, ameaças e conteúdo fora do escopo antes da triagem. Tickets bloqueados não gastam tokens do modelo.
 - **Só os campos necessários:** envie id, canal, produto e texto. Data e status não mudam a classificação.
 - **Pseudonimizar antes de enviar:** trocar CPF, conta, nome e e-mail por marcadores antes da chamada reduz o risco de vazamento.
 - **Regra de canal no código:** a regra de canal Banco Central ou Procon está no prompt e também no código, como rede de segurança: se a triagem não der Crítica, o código corrige logo depois.

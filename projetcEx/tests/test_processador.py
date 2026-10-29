@@ -90,6 +90,13 @@ class Base(unittest.TestCase):
         for name in (".claude", "regras"):
             shutil.copytree(HERE / name, self.root / name)
         shutil.copy(HERE / "CLAUDE.md", self.root / "CLAUDE.md")
+        self.definir_classificador(False)
+
+    def definir_classificador(self, ativo, modelo=""):
+        caminho = self.root / "regras" / "pipeline.json"
+        dados = json.loads(caminho.read_text(encoding="utf-8"))
+        dados["classificador_entrada"] = {"ativo": ativo, "model": modelo}
+        caminho.write_text(json.dumps(dados), encoding="utf-8")
 
 
 class FilesTests(Base):

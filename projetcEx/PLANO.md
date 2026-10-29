@@ -53,7 +53,7 @@ Dois agentes de partida (`triagem`, `risco`), um `CLAUDE.md`, regras fictícias 
 - Editor de agentes, criação e apagamento de agente, reordenação e o botão Cancelar pela página: cobertos por teste de servidor, não por navegador.
 - Layout em celular real (390 px): o Chrome headless só chega a 500 px. Em 500 px não há scroll horizontal, e com o corpo forçado a 390 px nenhum elemento passa da borda. Não testei em um navegador de celular.
 - Qualidade das respostas dos agentes: os prompts de `triagem`, `risco` e `relatorio` são um ponto de partida meu, nunca foram testados com um modelo.
-- O guardrail de entrada é por regex. Ele pega os padrões de injeção e ameaça que escrevi, mas **não detecta conteúdo fora do assunto** (p. 8: “alguém tentando usar o sistema para outros fins”). Isso pede um classificador, como o Bedrock Guardrails que o PDF exige.
+- O guardrail de entrada por regex pega só os padrões de injeção e ameaça previstos e **não detecta conteúdo fora do assunto** (p. 8: “alguém tentando usar o sistema para outros fins”). Por isso há um classificador de entrada por modelo leve (`classificador_entrada` em `regras/pipeline.json`) depois do regex. A organização aceitou guardrail em código no lugar do Bedrock Guardrails.
 - A máscara cobre CPF, cartão, e-mail, telefone e “conta + número”. Nomes de pessoas e endereços **não** são mascarados.
 - Os formatos do dataset vêm do PDF. O dataset real nunca foi visto, então id, data, canal e status podem diferir.
 

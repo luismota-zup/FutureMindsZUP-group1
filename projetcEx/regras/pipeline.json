@@ -103,6 +103,10 @@
   ],
   "separador": ",",
   "incluir_claude_md": true,
+  "classificador_entrada": {
+    "ativo": true,
+    "model": "haiku"
+  },
   "copiar_colunas": [
     "data_reclamacao",
     "canal",

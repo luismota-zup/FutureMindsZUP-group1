@@ -2,7 +2,9 @@
 
 Grafo por reclamação:
     guardrail_entrada ─ bloqueada ─► resposta_bloqueio
-                      └ liberada ─► agente 1 ─► agente 2 ─► ... ─► guardrail_saida
+                      └ liberada ─► [classificador_entrada] ─► agente 1 ─► agente 2 ─► ... ─► guardrail_saida
+    O classificador (modelo leve, opcional em pipeline.json) manda injeção, ameaça e conteúdo fora do escopo para
+    resposta_bloqueio e, sem resposta válida do modelo, para registrar_falha.
     Em cada agente: JSON inválido volta para o próprio agente (laço de validação, até TENTATIVAS chamadas);
     sem resposta válida vai para registrar_falha; "bloqueado": true vai para resposta_bloqueio.
 Grafo do lote: reclamacoes (o grafo acima, linha a linha) ─► relatorio.
@@ -50,6 +52,12 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
                      "saida": f"bloqueada: {motivo}", "duracao_s": round(time.time() - inicio, 3),
                      "erro": None, "modelo": None})
         return {"motivo": motivo, "anteriores": {}, "estado": {}, "tentativas": 0, "trechos": None, "saida": None}
+
+    def classificador_entrada(s: EstadoLinha) -> dict:
+        row = s["row"]
+        job.set_etapa(f"classificador_entrada · id {row['id']}")
+        motivo, erro = proc.classificar_entrada(job, call_model, row, plan)
+        return {"motivo": motivo, "erro": erro, "agente": "classificador_entrada"}
 
     def no_agente(i: int, agente: dict):
         def executar(s: EstadoLinha) -> dict:
@@ -118,7 +126,11 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
         return {}
 
     g = StateGraph(EstadoLinha)
+    usa_classificador = plan["config"]["classificador_entrada"]["ativo"]
+    primeiro = ordem[0] if ordem else "guardrail_saida"
     g.add_node("guardrail_entrada", guardrail_entrada)
+    if usa_classificador:
+        g.add_node("classificador_entrada", classificador_entrada)
     for i, agente in enumerate(agentes):
         g.add_node(agente["name"], no_agente(i, agente))
     g.add_node("guardrail_saida", guardrail_saida)
@@ -126,7 +138,12 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
     g.add_node("registrar_falha", registrar_falha)
     g.add_edge(START, "guardrail_entrada")
     g.add_conditional_edges("guardrail_entrada", lambda s: "bloqueada" if s["motivo"] else "liberada",
-                            {"bloqueada": "resposta_bloqueio", "liberada": ordem[0] if ordem else "guardrail_saida"})
+                            {"bloqueada": "resposta_bloqueio",
+                             "liberada": "classificador_entrada" if usa_classificador else primeiro})
+    if usa_classificador:
+        g.add_conditional_edges(
+            "classificador_entrada", lambda s: "falha" if s["erro"] else ("bloqueada" if s["motivo"] else "liberada"),
+            {"falha": "registrar_falha", "bloqueada": "resposta_bloqueio", "liberada": primeiro})
     for i, nome in enumerate(ordem):
         g.add_conditional_edges(nome, rota_agente, {
             "ok": ordem[i + 1] if i + 1 < len(ordem) else "guardrail_saida",
@@ -137,7 +154,7 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
 
 
 def _limite(plan: dict) -> dict:
-    # guardrail_entrada + até TENTATIVAS chamadas por agente + o nó final, com folga.
+    # guardrail_entrada, classificador_entrada, até TENTATIVAS chamadas por agente e o nó final, com folga.
     return {"recursion_limit": len(plan["agentes"]) * proc.TENTATIVAS + 5}
 
 
