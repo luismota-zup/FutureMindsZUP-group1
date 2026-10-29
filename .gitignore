@@ -9,3 +9,5 @@ __pycache__/
 *:Zone.Identifier
 .env
 .env.*
+/projetcEx/.venv
+.DS_Store
