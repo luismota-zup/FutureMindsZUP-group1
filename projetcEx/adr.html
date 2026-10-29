@@ -88,7 +88,7 @@ li{margin:4px 0}
 <h2 id="decisao">3. Decisão</h2>
 <section>
 <ul>
-<li><b>LangGraph</b> com dois grafos (<code>grafo.py</code>). O primeiro processa uma reclamação, com um nó por agente do <code>pipeline.json</code>. Cada agente recebe a saída <b>completa</b> dos anteriores (sinais, fatores, parecer), não só as colunas do CSV. O segundo processa o lote: todas as reclamações e, depois, o agente de relatório. JSON inválido volta ao próprio agente (laço de validação, até 2 chamadas) e a nova tentativa reaproveita os trechos da política. Sem resposta válida, a linha vai para <code>registrar_falha</code>. Cada nó registra no log o agente, a tentativa, o tempo do modelo e o tempo do RAG (<code>rag_s</code>).</li>
+<li><b>LangGraph</b> com dois grafos (<code>grafo.py</code>). O primeiro processa uma reclamação, com um nó por agente do <code>pipeline.json</code>. Cada agente recebe a saída <b>completa</b> dos anteriores (sinais, fatores, parecer), não só as colunas do CSV. O segundo processa o lote: todas as reclamações e, depois, o agente de relatório. JSON inválido volta ao próprio agente (laço de validação, até 2 chamadas) e a nova tentativa reaproveita os trechos da política. Sem resposta válida, a linha vai para <code>registrar_falha</code>. Cada nó registra no log o agente, a tentativa e o tempo do modelo; os nós <code>politica_&lt;agente&gt;</code> registram as seções recuperadas e o tempo do RAG.</li>
 <li><b>Um modelo por agente</b>, declarado no cabeçalho <code>model:</code> do arquivo. Hoje os três usam o alias <code>haiku</code>.</li>
 <li><b>Contas e listas no código, texto no modelo</b>: o dashboard, a lista de críticos e os pontos de atenção são calculados em código. O agente de relatório só escreve as recomendações.</li>
 <li><b>RAG local</b> com embeddings multilíngues, e o modo <code>urgencia</code> por regra como rede de segurança para fraude.</li>
@@ -100,18 +100,22 @@ li{margin:4px 0}
 <pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
   __start__ --> guardrail_entrada
   guardrail_entrada -. bloqueada .-> resposta_bloqueio
-  guardrail_entrada -. liberada .-> triagem
-  triagem -. ok .-> risco
+  guardrail_entrada -. liberada .-> politica_triagem
+  politica_triagem --> triagem
+  triagem -. ok .-> politica_risco
+  politica_risco --> risco
   triagem -. nova_tentativa .-> triagem
   triagem -. sem_resposta_valida .-> registrar_falha
   triagem -. nao_e_reclamacao .-> resposta_bloqueio
-  risco -. ok .-> guardrail_saida
+  risco -. ok .-> verificar_grounding
   risco -. nova_tentativa .-> risco
   risco -. sem_resposta_valida .-> registrar_falha
   risco -. nao_e_reclamacao .-> resposta_bloqueio
+  verificar_grounding --> guardrail_saida
   guardrail_saida --> __end__
   resposta_bloqueio --> __end__
   registrar_falha --> __end__</pre>
+<p><b>RAG como Knowledge Source (nível 3, item 3.3):</b> cada agente que declara <code>politica:</code> no cabeçalho tem um nó <code>politica_&lt;agente&gt;</code> antes dele. Esse nó recupera os trechos com a consulta já mascarada e registra no log as seções usadas. A nova tentativa reaproveita os trechos, sem buscar de novo. O nó <code>verificar_grounding</code> confere, sem chamar o modelo, se as seções citadas como <code>[2.4]</code> estavam entre as recuperadas e se cada ação imediata do risco começa por uma seção. Ele só marca o problema (no log, nos pontos de atenção e no parecer do caso crítico); não repete a chamada. Embeddings: <code>local</code> (fastembed) por padrão; o Titan v2 (<code>--embeddings bedrock</code>) já é suportado, mas não foi testado por falta de credencial AWS.</p>
 <h3>Grafo do lote</h3>
 <pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
   __start__ --> reclamacoes --> relatorio --> __end__</pre>

@@ -716,7 +716,7 @@ class DesafioTests(Base):
         self.assertEqual(plan["chamadas_base"], 5)
         self.assertEqual(usados[:2], ["haiku", "claude-sonnet-5-5"])
         self.assertEqual(usados[-1], "haiku")  # relatório
-        self.assertEqual({item["modelo"] for item in job.logs if item["agente"] != "guardrail_entrada"},
+        self.assertEqual({item["modelo"] for item in job.logs if item["agente"] in ("triagem", "risco", "relatorio")},
                          {"haiku", "claude-sonnet-5-5"})
         self.assertEqual(proc.preview(plan)["modelos"],
                          {"triagem": "haiku", "risco": "claude-sonnet-5-5", "relatorio": "haiku"})
@@ -868,15 +868,42 @@ class Nivel2Tests(Base):
         self.assertEqual(vezes[("3", "2")], proc.TENTATIVAS)
         triagem = [i for i in job.logs if i["id"] == "1" and i["agente"] == "triagem"]
         self.assertEqual([i["tentativa"] for i in triagem], [1, 2])
-        self.assertIsNotNone(triagem[0]["rag_s"])
-        self.assertIsNone(triagem[1]["rag_s"])
+        self.assertEqual(triagem[0]["trechos"], triagem[1]["trechos"])
+        rag = [i for i in job.logs if i["id"] == "1" and i["agente"] == "politica_triagem"]
+        self.assertEqual([i["saida"] for i in rag], ["seções: 2.4, 3.1"])  # um nó de RAG, mesmo com duas tentativas
         self.assertEqual(len(politica.consultas), 4)  # a nova tentativa reaproveita os trechos
         bloqueio = next(i for i in job.logs if i["agente"] == "guardrail_entrada")
         self.assertEqual((bloqueio["id"], bloqueio["modelo"]), ("2", None))
         self.assertTrue(bloqueio["saida"].startswith("bloqueada"))
         diagrama = grafo.mermaid(plan)
-        for no in ("guardrail_entrada", "nova_tentativa", "registrar_falha", "resposta_bloqueio", "relatorio"):
+        for no in ("guardrail_entrada", "politica_triagem", "politica_risco", "nova_tentativa", "verificar_grounding",
+                   "registrar_falha", "resposta_bloqueio", "relatorio"):
             self.assertIn(no, diagrama)
+
+    def test_grounding_marca_citacao_fora_dos_trechos_e_acao_sem_secao(self):
+        def model(system, user):
+            dados = json.loads(user)
+            if "etapa" in dados and dados["etapa"].startswith("2/"):
+                return json.dumps({"risco": "Crítico", "justificativa": "Conforme [9.9], fraude em curso.",
+                                   "acoes_imediatas": ["[2.4] Bloquear o cartão.", "Ligar para o cliente."]})
+            return fake_model(system, user)
+        _, job = self.run_job(model)
+        self.assertEqual(job.status, "concluido")
+        ok = next(r for r in job.linhas if r["id"] == "1")
+        problema = ok["grounding"][0]
+        self.assertEqual((problema["agente"], problema["fora_dos_trechos"], problema["acoes_sem_secao"]),
+                         ("risco", ["9.9"], 1))
+        self.assertTrue(any(i["agente"] == "verificar_grounding" and "9.9" in i["saida"] for i in job.logs))
+        rel = proc.relatorio_de(job)
+        self.assertEqual(rel["totais"]["sem_grounding"], 2)
+        self.assertTrue(any("sem respaldo" in a for a in rel["pontos_atencao"]))
+        self.assertIn("Verificar citação", rel["criticas"][0]["parecer"])
+        self.assertIn("Verificar citação", proc.render_html(rel))
+
+    def test_grounding_aceita_citacao_recuperada(self):
+        self.assertEqual(proc.verificar_grounding(
+            {"risco": {"justificativa": "Ver [2.4] e [3.1.2].", "acoes_imediatas": ["[3.1] Estornar."]}},
+            {"risco": ["2.4", "3.1"]}), [])
 
 
 if __name__ == "__main__":

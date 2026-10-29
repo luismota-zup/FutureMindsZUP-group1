@@ -103,6 +103,11 @@ Hoje só o prompt pede estas regras; um modelo pode ignorá-las.
 - [ ] Opcionais do PDF não feitos: atalho para urgência crítica e paralelismo entre reclamações.
 - [ ] Boto3: só justificado no ADR (sem acesso à conta AWS).
 
+### Etapa 11 — Nível 3, item 3.3: RAG como Knowledge Source
+- [x] Nó `politica_<agente>` no grafo antes de cada agente com `politica:`; a nova tentativa reaproveita os trechos.
+- [x] Nó `verificar_grounding`: citação fora dos trechos recuperados ou ação imediata sem seção é marcada no log, nos pontos de atenção e no parecer do caso crítico. Só marca, não repete a chamada.
+- [ ] Embeddings Titan v2 (`--embeddings bedrock`): código pronto, falta credencial AWS para reindexar e comparar com o `local`.
+
 ## 4. Fora do escopo desta pasta (decisões suas)
 - **ADR em HTML navegável** e a **justificativa de custos** (p. 8): são entregas de arquitetura do desafio. Posso gerar um rascunho se pedir.
 - **Bedrock Guardrails × tópicos do MS Copilot**: o PDF é inconsistente (p. 8 versus p. 9 e 10). O guardrail local desta pasta é um substituto de estudo. Confirme com a organização.
