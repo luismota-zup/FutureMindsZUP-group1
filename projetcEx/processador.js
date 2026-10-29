@@ -196,7 +196,7 @@ function modelSelect(f) {
   const opcoes = S.models.opcoes, atual = f.model || "";
   const select = el("select", {class: "model-select", "aria-label": "Modelo do agente " + f.nome},
     el("option", {value: "", text: "Padrão do servidor" + (S.models.padrao ? " (" + S.models.padrao + ")" : "")}),
-    ...opcoes.map(o => el("option", {value: o.valor, text: o.valor + (o.id ? " · " + o.id : " · sem ID no settings.json")})),
+    ...opcoes.map(o => el("option", {value: o.valor, text: (o.rotulo || o.valor) + (o.id ? " · " + o.id : " · sem ID no settings.json")})),
     ...(atual && !opcoes.some(o => o.valor === atual) ? [el("option", {value: atual, text: atual})] : []),
     el("option", {value: OUTRO, text: "Outro modelo…"}));
   select.value = atual;

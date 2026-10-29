@@ -104,7 +104,7 @@ Hoje só o prompt pede estas regras; um modelo pode ignorá-las.
 - [ ] Boto3: só justificado no ADR (sem acesso à conta AWS).
 
 ### Etapa 11 — Nível 3, item 3.3: RAG como Knowledge Source
-- [x] Nó `politica_<agente>` no grafo antes de cada agente com `politica:`; a nova tentativa reaproveita os trechos.
+- [x] A busca na política roda dentro do nó de cada agente com `politica:` (sem nó separado); a nova tentativa reaproveita os trechos.
 - [x] Nó `verificar_grounding`: citação fora dos trechos recuperados ou ação imediata sem seção é marcada no log, nos pontos de atenção e no parecer do caso crítico. Só marca, não repete a chamada.
 - [ ] Embeddings Titan v2 (`--embeddings bedrock`): código pronto, falta credencial AWS para reindexar e comparar com o `local`.
 

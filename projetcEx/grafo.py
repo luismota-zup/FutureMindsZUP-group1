@@ -2,10 +2,11 @@
 
 Grafo por reclamação:
     guardrail_entrada ─ bloqueada ─► resposta_bloqueio
-                      └ liberada ─► [politica_<agente>] ─► agente 1 ─► ... ─► [verificar_grounding] ─► guardrail_saida
-    politica_<agente>: nó de RAG (Knowledge Source) antes de cada agente que declara `politica:` no cabeçalho.
-    Em cada agente: JSON inválido volta para o próprio agente (laço de validação, até TENTATIVAS chamadas) e
-    reaproveita os trechos; sem resposta válida vai para registrar_falha; "bloqueado": true vai para resposta_bloqueio.
+                      └ liberada ─► agente 1 ─► ... ─► [verificar_grounding] ─► guardrail_saida
+    Em cada agente que declara `politica:` no cabeçalho, o próprio nó busca os trechos da política (consulta já
+    mascarada) na primeira tentativa. JSON inválido volta para o próprio agente (laço de validação, até TENTATIVAS
+    chamadas) e reaproveita os trechos; sem resposta válida vai para registrar_falha; "bloqueado": true vai para
+    resposta_bloqueio.
     verificar_grounding: confere se as seções citadas estavam entre as recuperadas (só marca, não chama o modelo).
 Grafo do lote: reclamacoes (o grafo acima, linha a linha) ─► relatorio.
 
@@ -47,9 +48,6 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
     ordem = [a["name"] for a in agentes]
     com_rag = {a["name"] for a in agentes if a.get("politica")}
 
-    def entrada(nome: str) -> str:
-        return f"politica_{nome}" if nome in com_rag else nome
-
     def guardrail_entrada(s: EstadoLinha) -> dict:
         row, inicio = s["row"], time.time()
         motivo = proc.guardrail(row["dados"][plan["csv"]["coluna_texto"]])
@@ -60,34 +58,19 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
         return {"motivo": motivo, "anteriores": {}, "estado": {}, "tentativas": 0, "trechos": None, "saida": None,
                 "fontes": {}, "grounding": []}
 
-    def no_politica(agente: dict):
-        """Knowledge Source: recupera os trechos da política para o agente seguinte (consulta já mascarada)."""
-        def executar(s: EstadoLinha) -> dict:
-            if job.cancel.is_set():
-                raise proc.Cancelled
-            row, inicio = s["row"], time.time()
-            job.set_etapa(f"política para {agente['name']} · id {row['id']}")
-            try:
-                trechos = proc.recuperar_politica(plan, agente, row, s["estado"])
-            except proc.ProcError as problema:
-                raise proc.JobAbort(str(problema)) from None
-            if not job.politica:
-                return {"trechos": trechos}
-            secoes = [t["secao"] for t in trechos]
-            job.log({"id": row["id"], "agente": f"politica_{agente['name']}",
-                     "entrada": "consulta: texto mascarado, canal, produto e urgência",
-                     "saida": "seções: " + (", ".join(secoes) or "nenhuma"),
-                     "duracao_s": round(time.time() - inicio, 3), "erro": None, "modelo": None,
-                     "politica": job.politica["rotulo"]})
-            return {"trechos": trechos, "fontes": {**s.get("fontes", {}), agente["name"]: secoes}}
-        return executar
-
     def no_agente(i: int, agente: dict):
         def executar(s: EstadoLinha) -> dict:
             if job.cancel.is_set():
                 raise proc.Cancelled
             row, tentativas, trechos = s["row"], s.get("tentativas", 0), s.get("trechos")
             job.set_etapa(f"{agente['name']} · id {row['id']}")
+            fontes: dict = {}
+            if tentativas == 0 and agente["politica"]:  # a nova tentativa reaproveita os trechos já recuperados
+                try:
+                    trechos = proc.recuperar_politica(plan, agente, row, s["estado"])
+                except proc.ProcError as problema:
+                    raise proc.JobAbort(str(problema)) from None
+                fontes = {**s.get("fontes", {}), agente["name"]: [t["secao"] for t in trechos]}
             rastreio = {"tentativa": tentativas + 1}
             if agente["politica"] and job.politica:
                 rastreio.update({"politica": job.politica["rotulo"],
@@ -97,8 +80,9 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
             saida, erro = proc.tentar_agente(job, call_model, agente, system, user, row["id"], rastreio)
             if saida is None:
                 return {"agente": agente["name"], "saida": None, "erro": erro,
-                        "tentativas": tentativas + 1, "trechos": trechos}
-            seguinte = {"agente": agente["name"], "saida": saida, "erro": None, "tentativas": 0, "trechos": None}
+                        "tentativas": tentativas + 1, "trechos": trechos, **({"fontes": fontes} if fontes else {})}
+            seguinte = {"agente": agente["name"], "saida": saida, "erro": None, "tentativas": 0, "trechos": None,
+                        **({"fontes": fontes} if fontes else {})}
             if saida.get("bloqueado") is True:  # o agente concluiu que não é uma reclamação (PDF, p. 8)
                 return {**seguinte, "motivo": proc.MOTIVO_AGENTE}
             if saida.get("ignorado") is True:  # agente seguinte a um bloqueio: nada a acrescentar
@@ -152,9 +136,6 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
     g = StateGraph(EstadoLinha)
     g.add_node("guardrail_entrada", guardrail_entrada)
     for i, agente in enumerate(agentes):
-        if agente["name"] in com_rag:
-            g.add_node(entrada(agente["name"]), no_politica(agente))
-            g.add_edge(entrada(agente["name"]), agente["name"])
         g.add_node(agente["name"], no_agente(i, agente))
     final = "verificar_grounding" if com_rag else "guardrail_saida"
     if com_rag:
@@ -165,10 +146,10 @@ def grafo_linha(plan: dict, job: proc.Job | None = None, call_model=None):
     g.add_node("registrar_falha", registrar_falha)
     g.add_edge(START, "guardrail_entrada")
     g.add_conditional_edges("guardrail_entrada", lambda s: "bloqueada" if s["motivo"] else "liberada",
-                            {"bloqueada": "resposta_bloqueio", "liberada": entrada(ordem[0]) if ordem else final})
+                            {"bloqueada": "resposta_bloqueio", "liberada": ordem[0] if ordem else final})
     for i, nome in enumerate(ordem):
         g.add_conditional_edges(nome, rota_agente, {
-            "ok": entrada(ordem[i + 1]) if i + 1 < len(ordem) else final,
+            "ok": ordem[i + 1] if i + 1 < len(ordem) else final,
             "nova_tentativa": nome, "sem_resposta_valida": "registrar_falha", "nao_e_reclamacao": "resposta_bloqueio"})
     for fim in ("guardrail_saida", "resposta_bloqueio", "registrar_falha"):
         g.add_edge(fim, END)

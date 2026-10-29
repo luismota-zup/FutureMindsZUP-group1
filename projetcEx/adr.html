@@ -100,10 +100,8 @@ li{margin:4px 0}
 <pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
   __start__ --> guardrail_entrada
   guardrail_entrada -. bloqueada .-> resposta_bloqueio
-  guardrail_entrada -. liberada .-> politica_triagem
-  politica_triagem --> triagem
-  triagem -. ok .-> politica_risco
-  politica_risco --> risco
+  guardrail_entrada -. liberada .-> triagem
+  triagem -. ok .-> risco
   triagem -. nova_tentativa .-> triagem
   triagem -. sem_resposta_valida .-> registrar_falha
   triagem -. nao_e_reclamacao .-> resposta_bloqueio
@@ -115,7 +113,7 @@ li{margin:4px 0}
   guardrail_saida --> __end__
   resposta_bloqueio --> __end__
   registrar_falha --> __end__</pre>
-<p><b>RAG como Knowledge Source (nível 3, item 3.3):</b> cada agente que declara <code>politica:</code> no cabeçalho tem um nó <code>politica_&lt;agente&gt;</code> antes dele. Esse nó recupera os trechos com a consulta já mascarada e registra no log as seções usadas. A nova tentativa reaproveita os trechos, sem buscar de novo. O nó <code>verificar_grounding</code> confere, sem chamar o modelo, se as seções citadas como <code>[2.4]</code> estavam entre as recuperadas e se cada ação imediata do risco começa por uma seção. Ele só marca o problema (no log, nos pontos de atenção e no parecer do caso crítico); não repete a chamada. Embeddings: <code>local</code> (fastembed) por padrão; o Titan v2 (<code>--embeddings bedrock</code>) já é suportado, mas não foi testado por falta de credencial AWS.</p>
+<p><b>RAG como Knowledge Source (nível 3, item 3.3):</b> o nó de cada agente que declara <code>politica:</code> no cabeçalho busca os trechos na primeira tentativa, com a consulta já mascarada, e registra no log do agente as seções usadas. A nova tentativa reaproveita os trechos, sem buscar de novo. O nó <code>verificar_grounding</code> confere, sem chamar o modelo, se as seções citadas como <code>[2.4]</code> estavam entre as recuperadas e se cada ação imediata do risco começa por uma seção. Ele só marca o problema (no log, nos pontos de atenção e no parecer do caso crítico); não repete a chamada. Embeddings: <code>local</code> (fastembed) por padrão; o Titan v2 (<code>--embeddings bedrock</code>) já é suportado, mas não foi testado por falta de credencial AWS.</p>
 <h3>Grafo do lote</h3>
 <pre class="card" style="overflow-x:auto;font-size:13px;line-height:1.5">graph TD
   __start__ --> reclamacoes --> relatorio --> __end__</pre>

@@ -41,7 +41,9 @@ RELATORIOS = HERE.parent / "relatorio"  # relatórios HTML de cada lote concluí
 POLITICA_PADRAO = HERE / "Docs - Challenge" / "KS_POLITICA_INTERNA (4).pdf"
 ERROS_CONTROLADOS = (proc.ProcError, rag.PoliticaError)
 MAX_PROC_BODY = 4_500_000
-MAX_OUTPUT_TOKENS = 1500
+# O raciocínio do modelo (thinking) conta neste limite. Medido com claude-haiku-5-5 na triagem real: ~2100 tokens de
+# raciocínio + ~340 de JSON. Com 1500 a resposta saía vazia (stop_reason=max_tokens) e a linha falhava duas vezes.
+MAX_OUTPUT_TOKENS = 6000
 
 
 class ModelError(Exception):
@@ -63,6 +65,8 @@ FATAL_MESSAGES = {
 
 
 ALIASES_MODELO = ("haiku", "sonnet", "opus")
+# Modelos oferecidos com o ID fixo, independentes do settings.json (o alias haiku pode apontar para outra versão).
+MODELOS_FIXOS = (("Haiku 5.5", "claude-haiku-5-5"),)
 
 
 def resolver_modelo(srv, modelo: str = "") -> str:
@@ -91,8 +95,8 @@ def _id_do_alias(alias: str) -> str:
 
 
 def opcoes_de_modelo(srv) -> dict:
-    """Modelos que a página oferece por agente. Só o provedor `claude` tem aliases; o ID de cada um vem do
-    settings.json (nunca a credencial). `id` vazio = alias sem ID definido, que falharia ao processar."""
+    """Modelos que a página oferece por agente. Só o provedor `claude` tem opções: os aliases (o ID de cada um vem
+    do settings.json, nunca a credencial) e os modelos fixos de MODELOS_FIXOS. `id` vazio = alias sem ID definido."""
     opcoes = []
     if srv.provider == "claude":
         for alias in ALIASES_MODELO:
@@ -101,7 +105,29 @@ def opcoes_de_modelo(srv) -> dict:
             except ModelError:
                 identificador = ""
             opcoes.append({"valor": alias, "id": identificador})
+        opcoes.extend({"valor": identificador, "id": identificador, "rotulo": rotulo}
+                      for rotulo, identificador in MODELOS_FIXOS)
     return {"padrao": srv.model, "provider": srv.provider, "opcoes": opcoes}
+
+
+class RespostaModelo(str):
+    """Texto da resposta com o uso medido pela API. É uma `str`, então todo código que só lê o texto segue igual."""
+
+    def __new__(cls, texto: str, tokens_entrada: int | None = None, tokens_saida: int | None = None, modelo: str = ""):
+        obj = super().__new__(cls, texto)
+        obj.tokens_entrada, obj.tokens_saida, obj.modelo = tokens_entrada, tokens_saida, modelo
+        return obj
+
+
+def _uso_de(data: object) -> tuple[int | None, int | None]:
+    """Tokens de entrada e saída informados pela API; None quando ela não informa (nunca um palpite)."""
+    uso = data.get("usage") if isinstance(data, dict) else None
+    if not isinstance(uso, dict):
+        return None, None
+    entrada = uso.get("input_tokens")
+    saida = uso.get("output_tokens")
+    valido = lambda n: n if isinstance(n, int) and not isinstance(n, bool) and n >= 0 else None  # noqa: E731
+    return valido(entrada), valido(saida)
 
 
 def make_call_model(srv):
@@ -138,10 +164,16 @@ def make_call_model(srv):
             raise ModelError(502, "Não foi possível conectar à API. Verifique rede, VPN e acesso.", False) from None
         except (ValueError, UnicodeDecodeError):
             raise ModelError(502, "A API retornou uma resposta inválida.", False) from None
+        if isinstance(data, dict) and data.get("stop_reason") == "max_tokens":
+            # O raciocínio do modelo conta no limite de saída: sem sobrar texto, repetir com o mesmo limite só gasta.
+            raise ModelError(502, f"O modelo gastou os {MAX_OUTPUT_TOKENS} tokens de saída antes de terminar a resposta "
+                                  "(stop_reason=max_tokens). Aumente MAX_OUTPUT_TOKENS em servidor.py ou use um modelo "
+                                  "com menos raciocínio; repetir a chamada com o mesmo limite falharia do mesmo jeito.", True)
         try:
-            return base.claude_response_text(data) if srv.provider == "claude" else base.response_text(data)
+            texto = base.claude_response_text(data) if srv.provider == "claude" else base.response_text(data)
         except base.ChatError as error:
             raise ModelError(error.status, str(error), False) from None
+        return RespostaModelo(texto, *_uso_de(data), id_modelo)
     return call_model
 
 

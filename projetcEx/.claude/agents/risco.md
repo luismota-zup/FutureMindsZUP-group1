@@ -1,7 +1,7 @@
 ---
 name: risco
 description: Avalia o risco de uma reclamação já triada e justifica o nível escolhido.
-model: haiku
+model: sonnet
 politica: busca, urgencia_decidida
 ---
 # PAPEL

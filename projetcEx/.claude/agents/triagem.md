@@ -1,7 +1,7 @@
 ---
 name: triagem
 description: Classifica uma reclamação de cliente em categoria, produto, sentimento e urgência, e escreve um resumo curto.
-model: haiku
+model: opus
 politica: busca, urgencia
 ---
 # PAPEL

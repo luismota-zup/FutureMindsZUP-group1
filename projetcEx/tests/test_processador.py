@@ -649,7 +649,7 @@ class HttpTests(Base):
         self.httpd.provider = "claude"
         code, body, _ = self.request("/api/proc/modelos")
         dados = json.loads(body)
-        self.assertEqual((code, dados["padrao"], [o["valor"] for o in dados["opcoes"]]), (200, "test-model", ["haiku", "sonnet", "opus"]))
+        self.assertEqual((code, dados["padrao"], [o["valor"] for o in dados["opcoes"]]), (200, "test-model", ["haiku", "sonnet", "opus", "claude-haiku-5-5"]))
         self.assertNotIn(b"test-secret", body)
         code, body, _ = self.request("/api/proc/modelo", {"agente": "risco", "modelo": "sonnet"})
         self.assertEqual((code, json.loads(body)), (200, {"agente": "risco", "model": "sonnet"}))
@@ -931,10 +931,132 @@ class SeletorDeModeloTests(Base):
         with patch.object(servidor.Path, "read_text", return_value=json.dumps({"env": ambiente})):
             dados = servidor.opcoes_de_modelo(srv)
         self.assertEqual(dados["padrao"], "claude-padrao")
-        self.assertEqual({o["valor"]: o["id"] for o in dados["opcoes"]}, {"haiku": "id-haiku", "sonnet": "id-sonnet", "opus": ""})
+        self.assertEqual({o["valor"]: o["id"] for o in dados["opcoes"]},
+                         {"haiku": "id-haiku", "sonnet": "id-sonnet", "opus": "", "claude-haiku-5-5": "claude-haiku-5-5"})
+        haiku_55 = next(o for o in dados["opcoes"] if o["valor"] == "claude-haiku-5-5")
+        self.assertEqual(haiku_55["rotulo"], "Haiku 5.5")  # ID fixo: não depende do alias haiku do settings.json
         self.assertNotIn("chave-secreta", json.dumps(dados))
         openai = servidor.opcoes_de_modelo(SimpleNamespace(provider="openai", model="gpt-x"))
         self.assertEqual(openai["opcoes"], [])  # aliases só existem no provedor claude
+
+
+def chamada(agente, modelo, entrada, saida):
+    """Entrada de log de uma chamada ao modelo, no formato que tentar_agente grava."""
+    return {"id": "1", "agente": agente, "modelo": modelo, "modelo_id": modelo, "duracao_s": 0.4,
+            "tokens_entrada": entrada, "tokens_saida": saida}
+
+
+class CustoPorChamadaTests(Base):
+    """O relatório calcula o custo com os tokens que a API informou, nunca com palpite."""
+
+    def test_calcula_custo_total_e_por_chamada_com_numeros_conferidos(self):
+        # Haiku 5.5: US$ 0,10 / US$ 0,50 por milhão. 2 chamadas: (1000+3000) entrada e (200+600) saída.
+        # entrada 4000 × 0,10 / 1e6 = 0,0004 ; saída 800 × 0,50 / 1e6 = 0,0004 ; total 0,0008 ; por chamada 0,0004.
+        custo = proc.custo_por_chamada([chamada("triagem", "claude-haiku-5-5", 1000, 200),
+                                        chamada("triagem", "claude-haiku-5-5", 3000, 600)])
+        self.assertEqual(len(custo["linhas"]), 1)
+        linha = custo["linhas"][0]
+        self.assertEqual((linha["chamadas"], linha["tokens_entrada"], linha["tokens_saida"]), (2, 4000, 800))
+        self.assertAlmostEqual(linha["custo_usd"], 0.0008, places=9)
+        self.assertAlmostEqual(linha["custo_por_chamada_usd"], 0.0004, places=9)
+        self.assertAlmostEqual(custo["total_usd"], 0.0008, places=9)
+        self.assertEqual((custo["sem_preco"], custo["chamadas_sem_uso"]), ([], 0))
+
+    def test_agrupa_por_agente_e_modelo_e_soma_o_total(self):
+        custo = proc.custo_por_chamada([chamada("triagem", "claude-haiku-5-5", 1_000_000, 0),
+                                        chamada("risco", "claude-sonnet-5-5", 1_000_000, 1_000_000)])
+        por = {(g["agente"], g["modelo"]): g["custo_usd"] for g in custo["linhas"]}
+        self.assertAlmostEqual(por[("triagem", "claude-haiku-5-5")], 0.10, places=9)
+        self.assertAlmostEqual(por[("risco", "claude-sonnet-5-5")], 12.00, places=9)  # 2,00 + 10,00
+        self.assertAlmostEqual(custo["total_usd"], 12.10, places=9)
+
+    def test_preco_desconhecido_nao_vira_zero_nem_entra_no_total(self):
+        custo = proc.custo_por_chamada([chamada("triagem", "claude-haiku-4-5", 5000, 500),
+                                        chamada("risco", "claude-haiku-5-5", 1_000_000, 0)])
+        desconhecido = next(g for g in custo["linhas"] if g["modelo"] == "claude-haiku-4-5")
+        self.assertIsNone(desconhecido["custo_usd"])
+        self.assertIsNone(desconhecido["custo_por_chamada_usd"])
+        self.assertEqual(custo["sem_preco"], ["claude-haiku-4-5"])
+        self.assertAlmostEqual(custo["total_usd"], 0.10, places=9)  # só o modelo com preço
+        self.assertEqual(proc._usd(None), "preço desconhecido")
+        self.assertIn("claude-haiku-4-5", " ".join(proc.avisos_de_custo(custo)))
+
+    def test_nos_de_codigo_nao_contam_como_chamada_sem_uso(self):
+        logs = [{"id": "1", "agente": "guardrail_entrada", "modelo": None, "duracao_s": 0.0},
+                {"id": "1", "agente": "verificar_grounding", "modelo": None, "duracao_s": 0.0},
+                {"id": "1", "agente": "guardrail_saida", "modelo": None, "duracao_s": 0.0},
+                chamada("triagem", "claude-haiku-5-5", 100, 50)]
+        custo = proc.custo_por_chamada(logs)
+        self.assertEqual((custo["chamadas_sem_uso"], len(custo["linhas"])), (0, 1))
+
+    def test_chamada_sem_uso_informado_e_avisada_e_o_total_nao_finge_estar_completo(self):
+        custo = proc.custo_por_chamada([chamada("triagem", "claude-haiku-5-5", 100, 50),
+                                        {"id": "2", "agente": "risco", "modelo": "haiku", "duracao_s": 0.3}])
+        self.assertEqual(custo["chamadas_sem_uso"], 1)
+        self.assertIn("subestimado", " ".join(proc.avisos_de_custo(custo)))
+
+    def test_relatorio_html_e_markdown_trazem_a_secao_de_custo(self):
+        plan = proc.prepare(self.root, {"csv": CSV}, POLITICA)
+        job = proc.Job(plan)
+        job.log(chamada("triagem", "claude-haiku-5-5", 4000, 800))
+        job.log(chamada("risco", "claude-haiku-4-5", 100, 10))
+        rel = proc.relatorio_de(job)
+        self.assertAlmostEqual(rel["custo"]["total_usd"], 0.0008, places=9)
+        html_ = proc.render_html(rel)
+        self.assertIn("<h2>Custo por chamada</h2>", html_)
+        self.assertIn("US$ 0,000800", html_)          # 4000×0,10 + 800×0,50 = 800 milionésimos, uma única chamada
+        self.assertIn("preço desconhecido", html_)     # haiku 4.5 sem preço
+        md = proc.render_markdown(rel)
+        self.assertIn("## Custo por chamada", md)
+        self.assertIn("Total do lote: US$ 0,000800.", md)
+        self.assertIn("Sem preço cadastrado para: claude-haiku-4-5", md)
+
+    def test_lote_sem_uso_nenhum_explica_em_vez_de_mostrar_zero(self):
+        plan = proc.prepare(self.root, {"csv": CSV}, POLITICA)
+        job = proc.Job(plan)
+        html_ = proc.render_html(proc.relatorio_de(job))
+        self.assertIn("não informou o uso de tokens", html_)
+        self.assertNotIn("US$ 0,000000", html_)
+
+    def test_adaptador_le_usage_da_api_e_a_resposta_continua_sendo_texto(self):
+        srv = SimpleNamespace(api_key="chave-teste", auth_header="x-api-key", provider="claude", endpoint="https://x",
+                              model="padrao")
+        corpo = {"type": "message", "stop_reason": "end_turn", "content": [{"type": "text", "text": "{\"a\": 1}"}],
+                 "usage": {"input_tokens": 1234, "output_tokens": 56}}
+        with patch("server.urlopen", return_value=io.BytesIO(json.dumps(corpo).encode())):
+            resposta = servidor.make_call_model(srv)("sistema", "usuario", "claude-haiku-5-5")
+        self.assertIsInstance(resposta, str)
+        self.assertEqual(resposta, "{\"a\": 1}")
+        self.assertEqual(json.loads(resposta), {"a": 1})
+        self.assertEqual((resposta.tokens_entrada, resposta.tokens_saida, resposta.modelo), (1234, 56, "claude-haiku-5-5"))
+        self.assertEqual(proc.uso_da_resposta(resposta),
+                         {"tokens_entrada": 1234, "tokens_saida": 56, "modelo_id": "claude-haiku-5-5"})
+
+    def test_uso_invalido_da_api_vira_ausente_e_nunca_um_numero_inventado(self):
+        for usage in ({}, {"input_tokens": "muitos"}, {"input_tokens": -5, "output_tokens": True}, None, "x"):
+            self.assertEqual(servidor._uso_de({"usage": usage}), (None, None), usage)
+        self.assertEqual(servidor._uso_de("nao e dict"), (None, None))
+        self.assertEqual(servidor._uso_de({"usage": {"input_tokens": 7}}), (7, None))
+        self.assertEqual(proc.uso_da_resposta("texto comum sem uso"), {})  # modelo simulado devolve str simples
+
+    def test_lote_completo_registra_tokens_de_cada_chamada_no_log(self):
+        class ModeloComUso(str):
+            pass
+
+        def modelo(system, user, modelo=""):
+            r = ModeloComUso(fake_model(system, user))
+            r.tokens_entrada, r.tokens_saida, r.modelo = 1000, 100, "claude-haiku-5-5"
+            return r
+        plan = proc.prepare(self.root, {"csv": CSV}, POLITICA)
+        job = proc.Job(plan)
+        proc.run_job(job, plan, modelo)
+        self.assertEqual(job.status, "concluido")
+        com_uso = [i for i in job.logs if "tokens_entrada" in i]
+        self.assertEqual(len(com_uso), job.chamadas)  # toda chamada ao modelo registrou o uso
+        self.assertTrue(all(i["tokens_entrada"] == 1000 and i["modelo_id"] == "claude-haiku-5-5" for i in com_uso))
+        rel = proc.relatorio_de(job)
+        self.assertEqual(rel["custo"]["chamadas_sem_uso"], 0)
+        self.assertAlmostEqual(rel["custo"]["total_usd"], job.chamadas * (1000 * 0.10 + 100 * 0.50) / 1_000_000, places=9)
 
 
 class Nivel2Tests(Base):
@@ -1005,16 +1127,18 @@ class Nivel2Tests(Base):
         triagem = [i for i in job.logs if i["id"] == "1" and i["agente"] == "triagem"]
         self.assertEqual([i["tentativa"] for i in triagem], [1, 2])
         self.assertEqual(triagem[0]["trechos"], triagem[1]["trechos"])
-        rag = [i for i in job.logs if i["id"] == "1" and i["agente"] == "politica_triagem"]
-        self.assertEqual([i["saida"] for i in rag], ["seções: 2.4, 3.1"])  # um nó de RAG, mesmo com duas tentativas
+        self.assertFalse([i for i in job.logs if i["agente"].startswith("politica_")])  # não há mais nó de RAG separado
+        self.assertEqual([t["secao"] for t in triagem[0]["trechos"]], ["2.4", "3.1"])  # as seções ficam no log do agente
         self.assertEqual(len(politica.consultas), 4)  # a nova tentativa reaproveita os trechos
         bloqueio = next(i for i in job.logs if i["agente"] == "guardrail_entrada")
         self.assertEqual((bloqueio["id"], bloqueio["modelo"]), ("2", None))
         self.assertTrue(bloqueio["saida"].startswith("bloqueada"))
         diagrama = grafo.mermaid(plan)
-        for no in ("guardrail_entrada", "politica_triagem", "politica_risco", "nova_tentativa", "verificar_grounding",
+        for no in ("guardrail_entrada", "nova_tentativa", "verificar_grounding",
                    "registrar_falha", "resposta_bloqueio", "relatorio"):
             self.assertIn(no, diagrama)
+        self.assertNotIn("politica_triagem", diagrama)
+        self.assertNotIn("politica_risco", diagrama)
 
     def test_grounding_marca_citacao_fora_dos_trechos_e_acao_sem_secao(self):
         def model(system, user):

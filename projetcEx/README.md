@@ -54,8 +54,8 @@ Se a indexação falhar, o servidor sobe mesmo assim, mostra um `AVISO` no termi
 
 O lote roda em dois grafos LangGraph, definidos em `grafo.py` e montados a partir do `pipeline.json`:
 
-- **Por reclamação:** `guardrail_entrada` → (`politica_<agente>` →) um nó por agente de `agentes` → `verificar_grounding` → `guardrail_saida`.
-  - `politica_<agente>` (RAG como Knowledge Source): existe para cada agente que declara `politica:` no cabeçalho. Recupera os trechos com a consulta mascarada e os entrega ao agente seguinte.
+- **Por reclamação:** `guardrail_entrada` → um nó por agente de `agentes` → `verificar_grounding` → `guardrail_saida`.
+  - RAG (Knowledge Source): o nó de cada agente que declara `politica:` no cabeçalho busca os trechos na primeira tentativa, com a consulta mascarada. A nova tentativa reaproveita os trechos, sem buscar de novo.
   - `verificar_grounding`: confere, sem modelo, se as seções citadas (`[2.4]`) estavam entre as recuperadas e se cada ação imediata do risco começa por uma seção. Só marca: aparece no log, nos pontos de atenção e no parecer do caso crítico (“Verificar citação: …”).
   - Arestas condicionais:
     - `bloqueada` vai para `resposta_bloqueio`;
@@ -65,7 +65,7 @@ O lote roda em dois grafos LangGraph, definidos em `grafo.py` e montados a parti
   - Cada agente recebe em `resultados_anteriores` a saída **completa** dos anteriores (por exemplo, os `sinais` da triagem), já mascarada.
 - **Do lote:** `reclamacoes` (o grafo acima, linha a linha) → `relatorio` (o `agente_relatorio`, uma vez).
 
-Para cada chamada, o log registra o agente, a tentativa, o modelo, o tempo, a entrada e a saída. Para os agentes com política, registra também os trechos usados; o nó `politica_<agente>` registra as seções recuperadas e o tempo do RAG. Os bloqueios do guardrail de entrada aparecem como `guardrail_entrada`.
+Para cada chamada, o log registra o agente, a tentativa, o modelo, o tempo, a entrada e a saída. Para os agentes com política, registra também as seções usadas (`trechos`). Os bloqueios do guardrail de entrada aparecem como `guardrail_entrada`.
 
 Para ver o diagrama Mermaid do pipeline atual, rode: `python grafo.py`.
 

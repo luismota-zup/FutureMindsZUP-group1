@@ -1,9 +1,10 @@
 {
   "agentes": [
     "triagem",
-    "risco"
+    "risco",
+    "relatorio"
   ],
-  "agente_relatorio": "relatorio",
+  "agente_relatorio": "",
   "campos": [
     {
       "padrao": "Outros",

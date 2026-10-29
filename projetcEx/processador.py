@@ -48,6 +48,15 @@ SEPARATORS = (",", ";")
 # urgencia = todas as seções de urgência; urgencia_decidida = só a da urgência já definida pela triagem.
 MODOS_POLITICA = ("busca", "urgencia", "urgencia_decidida")
 MAX_POLITICA_CHARS = 8000
+# Preço público por milhão de tokens (entrada, saída) em US$, o mesmo dos documentos prompt_agente_*.md e do ADR.
+# Chave = ID real do modelo devolvido pela API. Modelo ausente daqui aparece como "preço desconhecido", nunca como zero.
+# Confirme os valores no site do provedor antes de apresentar; no Bedrock o preço é definido pela AWS.
+NOS_DE_CODIGO = ("guardrail_entrada", "guardrail_saida", "verificar_grounding")  # entradas de log sem chamada ao modelo
+PRECOS_POR_MILHAO = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-opus-5-5": (4.00, 20.00),
+}
 
 # Dataset oficial (PDF, p. 3). Canais e status são exemplos do PDF, então só geram aviso.
 ESQUEMA_OFICIAL = ("id", "data_reclamacao", "canal", "texto_reclamacao", "produto", "status")
@@ -435,10 +444,14 @@ def parse_texto(text: object, limite: int | None = None) -> dict:
 # ------------------------------------------------------------------ máscara, ofuscação e guardrails
 SENSIVEIS = [
     ("CONTA", re.compile(r"\b(?:conta|c/c|cc)\b[^\d\n]{0,15}\d{4,12}(?:-\d)?", re.I)),
-    ("CPF", re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")),
-    ("CARTAO", re.compile(r"\b(?:\d[ -]?){13,16}\b")),
+    ("CPF", re.compile(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b")),  # com ou sem pontuação (11 dígitos)
+    ("CARTAO", re.compile(r"\b\d(?:[ -]?\d){12,18}\b")),  # 13 a 19 dígitos, com ou sem espaço; não engole o espaço final
     ("EMAIL", re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")),
     ("TELEFONE", re.compile(r"\(?\b\d{2}\)?\s?9?\d{4}-\d{4}\b")),
+    ("CVV", re.compile(r"\b(?:cvv2?|cvc|c[óo]digo de seguran[çc]a)\b\W{0,12}\d{3,4}\b", re.I)),
+    ("VALIDADE", re.compile(r"\b(?:validade|vence em|venc\.?)\b\W{0,8}\d{1,2}\s*/\s*\d{2,4}\b", re.I)),
+    ("AGENCIA", re.compile(r"\bag[êe]ncia\b\W{0,8}\d{3,5}(?:-\d)?", re.I)),
+    ("SENHA", re.compile(r"\bsenha\b[^\d\n]{0,15}\d{4,8}\b", re.I)),
 ]
 ATAQUES = [
     r"ignor[ae] (as )?(regras|instru[cç][õo]es)",
@@ -1020,6 +1033,14 @@ def chamar(call_model, system: str, user: str, modelo: str) -> str:
     return call_model(system, user, modelo=modelo) if aceita else call_model(system, user)
 
 
+def uso_da_resposta(resposta: object) -> dict:
+    """Tokens e ID real do modelo que a API informou nesta chamada (vazio quando o chamador não informa)."""
+    entrada, saida = getattr(resposta, "tokens_entrada", None), getattr(resposta, "tokens_saida", None)
+    if entrada is None and saida is None:
+        return {}
+    return {"tokens_entrada": entrada, "tokens_saida": saida, "modelo_id": getattr(resposta, "modelo", "") or None}
+
+
 def tentar_agente(job: Job, call_model, agente: dict, system: str, user: str, id_linha: str,
                   rastreio: dict | None = None) -> tuple[dict | None, str | None]:
     """Uma chamada ao modelo do agente, registrada no log. Devolve (JSON, None) ou (None, erro).
@@ -1041,7 +1062,7 @@ def tentar_agente(job: Job, call_model, agente: dict, system: str, user: str, id
              "entrada": ofuscar(mascarar(user), job.improprios)[:1000],
              "saida": sanitizar(resposta, job.improprios)[:1000],
              "duracao_s": round(time.time() - inicio, 3), "erro": erro,
-             "modelo": agente["model"] or None, **(rastreio or {})})
+             "modelo": agente["model"] or None, **uso_da_resposta(resposta), **(rastreio or {})})
     if fatal:
         raise JobAbort(erro)
     if job.note_technical(tecnica) >= MAX_FALHAS_SEGUIDAS:
@@ -1119,7 +1140,8 @@ def executar_relatorio(job: Job, plan: dict, call_model) -> None:
             fatal = getattr(problema, "fatal", False)
         job.log({"id": "relatório", "agente": agente["name"], "entrada": ofuscar(mascarar(user), job.improprios)[:1000],
                  "saida": sanitizar(resposta, job.improprios)[:1000],
-                 "duracao_s": round(time.time() - inicio, 3), "erro": erro, "modelo": agente["model"] or None})
+                 "duracao_s": round(time.time() - inicio, 3), "erro": erro, "modelo": agente["model"] or None,
+                 **uso_da_resposta(resposta)})
         if erro is None:
             return
         if fatal:
@@ -1208,6 +1230,39 @@ def _contagem(listas) -> list[list]:
     return [[v, n] for v, n in contagem.most_common(15)]
 
 
+def custo_por_chamada(logs: list[dict]) -> dict:
+    """Custo do lote por agente e modelo, a partir dos tokens que a API informou em cada chamada.
+
+    Preço desconhecido nunca vira zero: o grupo fica com custo None e entra em `sem_preco`. Chamada sem uso informado
+    (modelo simulado, API que não devolve `usage`) é contada à parte, para o total não parecer completo sem ser.
+    """
+    grupos: dict[tuple[str, str], dict] = {}
+    sem_uso = 0
+    for item in logs:
+        if item["agente"] in NOS_DE_CODIGO:
+            continue  # guardrails e grounding: nós de código, sem chamada ao modelo
+        if item.get("tokens_entrada") is None and item.get("tokens_saida") is None:
+            sem_uso += 1  # chamada ao modelo cuja API não informou o uso
+            continue
+        modelo = item.get("modelo_id") or item.get("modelo") or "padrão do servidor"
+        g = grupos.setdefault((item["agente"], modelo), {"agente": item["agente"], "modelo": modelo, "chamadas": 0,
+                                                         "tokens_entrada": 0, "tokens_saida": 0})
+        g["chamadas"] += 1
+        g["tokens_entrada"] += item.get("tokens_entrada") or 0
+        g["tokens_saida"] += item.get("tokens_saida") or 0
+    linhas, total, sem_preco = [], 0.0, []
+    for g in grupos.values():
+        preco = PRECOS_POR_MILHAO.get(g["modelo"])
+        custo = None if preco is None else (g["tokens_entrada"] * preco[0] + g["tokens_saida"] * preco[1]) / 1_000_000
+        if custo is None:
+            sem_preco.append(g["modelo"])
+        else:
+            total += custo
+        linhas.append({**g, "custo_usd": None if custo is None else round(custo, 6),
+                       "custo_por_chamada_usd": None if custo is None else round(custo / g["chamadas"], 6)})
+    return {"linhas": linhas, "total_usd": round(total, 6), "sem_preco": sorted(set(sem_preco)), "chamadas_sem_uso": sem_uso}
+
+
 def relatorio_de(job: Job) -> dict:
     """Dashboard, casos críticos com parecer, pontos de atenção e recomendações. Contas feitas em código."""
     with job.lock:
@@ -1282,6 +1337,7 @@ def relatorio_de(job: Job) -> dict:
         "avisos": [sanitizar(x, extras) for x in avisos],
         "nota_recomendacoes": nota if recomendacoes == [] else None,
         "tempos": {a: {"chamadas": len(v), "media_s": round(sum(v) / len(v), 3)} for a, v in tempos.items()},
+        "custo": custo_por_chamada(logs),
         "bloqueadas": [{"id": r["id"], "motivo": r["motivo"], "resposta": r["resposta"], "origem": r["origem"]}
                        for r in bloqueadas],
         "falhas": [{"id": r["id"], "motivo": sanitizar(r["motivo"], extras), "origem": r["origem"]} for r in falhas],
@@ -1340,6 +1396,28 @@ main{max-width:980px;margin:0 auto;padding:32px 20px 60px}h1{font-size:30px;marg
 th{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#62726b}.note{border-left:3px solid #c89d62;background:#fbf3e7;padding:10px 14px;font-size:13px}
 .crit{border-left:3px solid #8a3e20}li{margin:6px 0}@media print{body{background:#fff}.card{break-inside:avoid}}
 """
+
+
+def _usd(valor: float | None) -> str:
+    """US$ com seis casas, que mostram frações de centavo; None é preço desconhecido, nunca zero."""
+    return "preço desconhecido" if valor is None else "US$ " + f"{valor:.6f}".replace(".", ",")
+
+
+def linhas_de_custo(custo: dict) -> list[list]:
+    return [[g["agente"], g["modelo"], g["chamadas"], f"{g['tokens_entrada']:,}".replace(",", "."),
+             f"{g['tokens_saida']:,}".replace(",", "."), _usd(g["custo_por_chamada_usd"]), _usd(g["custo_usd"])]
+            for g in custo["linhas"]]
+
+
+def avisos_de_custo(custo: dict) -> list[str]:
+    avisos = []
+    if custo["sem_preco"]:
+        avisos.append("Sem preço cadastrado para: " + ", ".join(custo["sem_preco"]) + ". Esses modelos ficam fora do total; "
+                      "adicione o preço em PRECOS_POR_MILHAO (processador.py).")
+    if custo["chamadas_sem_uso"]:
+        avisos.append(f"{custo['chamadas_sem_uso']} chamada(s) não informaram tokens e ficaram fora do custo; "
+                      "o total pode estar subestimado.")
+    return avisos
 
 
 def render_html(rel: dict) -> str:
@@ -1408,6 +1486,17 @@ def render_html(rel: dict) -> str:
         partes.append("<h2>Tempo por agente</h2>" + tabela(
             ["agente", "chamadas", "tempo médio (s)"],
             [[a, v["chamadas"], v["media_s"]] for a, v in rel["tempos"].items()]))
+    custo = rel["custo"]
+    partes.append("<h2>Custo por chamada</h2>")
+    if custo["linhas"]:
+        partes.append(f"<p class='sub'>Tokens informados pela API em cada chamada, com o preço público por modelo. "
+                      f"Total do lote: <b>{e(_usd(custo['total_usd']))}</b>.</p>"
+                      + tabela(["agente", "modelo", "chamadas", "tokens de entrada", "tokens de saída",
+                                "custo por chamada", "custo total"], linhas_de_custo(custo)))
+    else:
+        partes.append("<p class='note'>A API não informou o uso de tokens neste lote, então não há custo para calcular.</p>")
+    for aviso in avisos_de_custo(custo):
+        partes.append(f"<p class='note'>{e(aviso)}</p>")
     return ("<!doctype html><html lang='pt-BR'><head><meta charset='utf-8'>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'>"
             f"<title>Relatório gerencial</title><style>{CSS_RELATORIO}</style></head><body><main>"
@@ -1454,6 +1543,15 @@ def render_markdown(rel: dict) -> str:
     if rel["tempos"]:
         md += ["", "## Tempo médio por agente", ""] + [
             f"- {a}: {v['media_s']:.2f}s em {v['chamadas']} chamada(s)" for a, v in rel["tempos"].items()]
+    custo = rel["custo"]
+    md += ["", "## Custo por chamada", ""]
+    if custo["linhas"]:
+        md += [f"Total do lote: {_usd(custo['total_usd'])}.", ""]
+        md += [f"- {a} · {m} · {n} chamada(s) · {te} tokens de entrada · {ts} tokens de saída · "
+               f"{cc} por chamada · {ct} no total" for a, m, n, te, ts, cc, ct in linhas_de_custo(custo)]
+    else:
+        md += ["A API não informou o uso de tokens neste lote, então não há custo para calcular."]
+    md += [f"- Aviso: {a}" for a in avisos_de_custo(custo)]
     return "\n".join(md)
 
 
