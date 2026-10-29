@@ -102,7 +102,7 @@
     }
   ],
   "separador": ",",
-  "incluir_claude_md": true,
+  "incluir_claude_md": false,
   "classificador_entrada": {
     "ativo": true,
     "model": "haiku"
